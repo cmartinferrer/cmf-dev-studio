@@ -483,3 +483,12 @@ uv run uvicorn multi_agent_software_team.api.app:app --reload --host 127.0.0.1 -
 - `GET /api/missions/{run_id}/events?after_id=0` retrieves ordered progress events; poll with the last received event ID.
 
 Only one queued/running mission is allowed per project. Runs use Gemini and the Docker test runner, and require the same credentials and local Docker image as the CLI. **Generated files are stored in SQLite, not written to registered project folders.** Existing repositories remain untouched. This is a local-only, unauthenticated API: do not expose it to a network. Process restarts do not resume in-flight missions; recovery, cancellation, streaming and applying changes are future iterations.
+
+## Workspace UX v2
+
+- The **Open existing project** dialog has a **Browse…** button. It lists folders on the FastAPI host (not on a remote browser client). By default it is restricted to the server user's home directory. Set `STUDIO_BROWSE_ROOT=/absolute/allowed/directory` before starting Uvicorn to restrict it further. Hidden directories and symlinks are excluded.
+- Each project workspace now has **Files**, **Agent missions**, and **Project details** tabs.
+- **Files** includes a bounded filename search, line numbers, and lightweight syntax highlighting for Python and JavaScript/TypeScript. Preview remains read-only.
+- Filename search inspects up to 5,000 entries and returns up to 100 results; it ignores hidden files, symlinks and dependency/build folders. No file content is sent by search.
+
+For local validation: `uv run pytest -q -m 'not integration'`, then `cd frontend && npm install && npm run build`. Run FastAPI and `npm run dev` to verify the folder picker, tabs, search, and preview. Do not commit until functional checks pass.

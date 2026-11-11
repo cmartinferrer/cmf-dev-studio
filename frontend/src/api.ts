@@ -28,3 +28,8 @@ export type DirectoryListing = { path: string; entries: FileEntry[]; truncated: 
 export type FilePreview = { path: string; content: string; size: number };
 export const listProjectFiles = (projectId: string, path = '') => request<DirectoryListing>(`/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(path)}`);
 export const readProjectFile = (projectId: string, path: string) => request<FilePreview>(`/projects/${encodeURIComponent(projectId)}/file?path=${encodeURIComponent(path)}`);
+
+export type FolderListing = { root: string; path: string; parent: string | null; directories: { name: string; path: string }[]; truncated: boolean };
+export const browseLocalDirectories = (path = '') => request<FolderListing>(`/local/directories?path=${encodeURIComponent(path)}`);
+export type FileSearchResult = { query: string; entries: FileEntry[]; truncated: boolean };
+export const searchProjectFiles = (projectId: string, query: string) => request<FileSearchResult>(`/projects/${encodeURIComponent(projectId)}/search?q=${encodeURIComponent(query)}`);

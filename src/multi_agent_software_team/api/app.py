@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from multi_agent_software_team.projects import Project, ProjectManager
 from multi_agent_software_team.projects.explorer import ExplorerError, list_directory, read_file
 from multi_agent_software_team.missions import MissionService
+from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
+from multi_agent_software_team.projects.search import search_files
 
 
 class ProjectResponse(BaseModel):
@@ -85,6 +87,23 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
+
+    @app.get("/api/local/directories")
+    def local_directories(path: str = "") -> dict:
+        try:
+            return browse_directory(path)
+        except (FolderBrowserError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/search")
+    def project_search(project_id: str, q: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            return search_files(project.path, q)
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/files")
     def project_files(project_id: str, path: str = "") -> dict:
