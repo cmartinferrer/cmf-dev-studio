@@ -323,3 +323,27 @@ filesystem and workspace, dropped Linux capabilities, resource limits, and a
 process timeout. The Docker socket and home directory are not mounted.
 **This is risk reduction, not a guarantee against malicious generated code.**
 Do not grant the container elevated privileges or mount sensitive files.
+
+
+## Live execution timeline (Rich)
+
+The CLI now renders agent progress, Docker test outcomes, retries, and a readable
+mission summary in real time using Rich. By default it displays the final code
+and requirements without flooding the screen with pytest tracebacks.
+
+```bash
+uv sync
+uv run python main.py "Implement a Python function add(a, b) returning their sum"
+uv run python main.py --verbose "Implement a Python function add(a, b) returning their sum"
+uv run python main.py --generate-only --example
+```
+
+`--verbose` also shows generated pytest tests and complete output for every
+Docker attempt. The execution core emits typed `ExecutionEvent` notifications
+through an optional `on_event` callback. Rich is only a terminal adapter;
+future web/GUI/API clients can subscribe to the same events without changing
+the agents, runner, or orchestration logic. The existing `Mission.history`
+continues to store full attempt data.
+
+The sandbox reduces risk but cannot guarantee secure execution of malicious
+code; use a suitably isolated Docker host for untrusted generation.

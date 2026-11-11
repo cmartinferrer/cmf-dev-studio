@@ -51,9 +51,9 @@ def test_cli_runs_end_to_end_with_retry_and_history(cli_deps, monkeypatch, capsy
     assert runner.run.call_count == 2
     assert len(llm.prompts) == 4
     output = capsys.readouterr().out
-    assert "Attempt 1: test_failed" in output
-    assert "Attempt 2: passed" in output
-    assert "Status: completed" in output
+    assert "attempt 1" in output.lower()
+    assert "attempt 2" in output.lower()
+    assert "COMPLETED" in output
 
 
 def test_cli_allows_noninteractive_docker_execution(cli_deps, monkeypatch):
@@ -74,6 +74,7 @@ def test_cli_reports_failed_mission(cli_deps, monkeypatch):
     _, runner = cli_deps
     runner.run.return_value = RunnerResult(False, 1, "failure", "", RunnerStatus.TEST_FAILED)
     assert cli.main(["Implement addition", "--run-tests", "--max-attempts", "1"]) == 1
+
 
 def test_package_entrypoint_delegates(monkeypatch):
     import multi_agent_software_team

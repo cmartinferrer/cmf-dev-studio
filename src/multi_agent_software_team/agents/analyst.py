@@ -19,7 +19,6 @@ class AnalystAgent:
         Args:
             mission: Shared mission state to update.
         """
-        print("[Analyst] Analyzing mission...")
 
         prompt = (
             "You are a software requirements analyst.\n"
@@ -42,5 +41,3 @@ class AnalystAgent:
             raise ValueError("Analyst generated no valid requirements")
 
         mission.requirements = requirements
-
-        print("[Analyst] Requirements defined.")

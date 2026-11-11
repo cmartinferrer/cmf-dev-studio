@@ -26,7 +26,6 @@ class TesterAgent:
         Args:
             mission: Mission containing requirements and generated code.
         """
-        print("[Tester] Generating tests...")
 
         requirements = "\n".join(
             f"- {requirement}"
@@ -54,5 +53,3 @@ class TesterAgent:
             raise ValueError("Tester generated no valid tests")
 
         mission.tests = tests.strip() + "\n"
-
-        print("[Tester] Tests generated.")

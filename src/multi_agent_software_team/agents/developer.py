@@ -20,7 +20,6 @@ class DeveloperAgent:
         Raises:
             ValueError: If the LLM returns an empty implementation.
         """
-        print("[Developer] Generating implementation...")
 
         requirements = "\n".join(
             f"- {requirement}" for requirement in mission.requirements
@@ -49,4 +48,3 @@ class DeveloperAgent:
             raise ValueError("Developer generated no valid code")
 
         mission.code = code.strip() + "\n"
-        print("[Developer] Implementation generated.")
