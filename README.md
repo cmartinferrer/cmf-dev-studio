@@ -365,3 +365,40 @@ uv run python main.py "Implement a Python function add(a, b) returning their sum
 These diagnostics are derived from the existing `Mission.history` records and
 do not change agent decisions, retry behavior, or Docker execution. A passing
 test suite does not independently guarantee correctness of generated code.
+## Multi-Agent Studio — Project Registry (first iteration)
+
+The UI-independent `ProjectManager` is the first building block for the future
+React/FastAPI Studio. It persists project metadata in SQLite and supports both:
+
+- **Managed projects:** `create(name, description)` creates a new empty workspace
+  under the Studio data directory.
+- **Existing projects:** `register_existing(path, name, description)` registers
+  a directory without modifying its files. These projects are marked read-only
+  in this first iteration.
+
+Other operations: `get(project_id)` and `list_projects()`.
+
+Try the manager locally, without Gemini or Docker:
+
+```python
+from multi_agent_software_team.projects import ProjectManager
+
+manager = ProjectManager('.studio-data')
+new_project = manager.create('Calculator')
+existing_project = manager.register_existing('/absolute/path/to/your/repository')
+for project in manager.list_projects():
+    print(project.name, project.kind.value, project.path)
+```
+
+`.studio-data/` is ignored by Git. The registry **does not** run agents, import
+existing source files, copy repositories, or modify existing projects. It is
+not yet a history-of-missions service, API, or web frontend; those will be
+implemented in subsequent iterations. Existing projects must remain available
+at their registered paths. Back up the Studio data directory to preserve the
+SQLite registry and managed workspaces.
+
+Run focused tests:
+
+```bash
+uv run pytest -v tests/test_project_manager.py
+```
