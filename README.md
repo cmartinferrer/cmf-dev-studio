@@ -442,3 +442,29 @@ will add explicit workspace access controls, safe change review, and execution.
 Run the tests with `uv run pytest -v` (Docker integration tests require Docker).
 The current ZIP retains the previous `uv.lock`; `uv sync` regenerates it with
 FastAPI, Uvicorn and HTTPX on the developer machine.
+
+
+## Multi-Agent Studio web UI (React + TypeScript)
+
+This is the first **project dashboard** UI, not yet an agent execution IDE. It uses the existing REST endpoints to list, create, and register projects, and displays project metadata. Existing folders are registered read-only; this release does not browse, edit, or execute their code.
+
+Run in two terminals from the repository root:
+
+```bash
+uv sync
+uv run uvicorn multi_agent_software_team.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+In another terminal:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open **http://127.0.0.1:5173**. Vite proxies `/api` to the FastAPI server on `127.0.0.1:8000`; no CORS configuration or public exposure is needed. Use `npm run build` to verify TypeScript and the production bundle. Commit the generated `frontend/package-lock.json` for reproducible installs.
+
+**Opening an existing project:** enter an absolute folder path on the machine running FastAPI. Browsers cannot give the server unrestricted local folder access; a folder picker and safe workspace copy/edit workflow will come later.
+
+**Security:** Both servers are for trusted local development only. The API currently has no authentication; do not expose it to your network or the Internet.
