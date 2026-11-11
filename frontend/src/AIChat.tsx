@@ -57,7 +57,7 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
         <div className="chat-user-bubble">{item.task}</div>
         <div className="chat-assistant-message">
           <div className="chat-response-heading"><Bot size={15}/><strong>{describe(item.status)}</strong>{activeStatuses.includes(item.status)&&<LoaderCircle className="chat-spin" size={14}/>}</div>
-          {item.error&&<div className="chat-error">{item.error}</div>}
+          {item.error&&<div className="chat-error">{item.error.includes('Permission required') || item.error.includes('unapproved') ? 'This change needs permission to read an existing file. Select it under Context, approve the preview, then retry your request.' : item.error.includes('Cannot create existing file') || item.error.includes('already exists') ? 'The AI tried to create a file that already exists. Please approve the existing file in Context and retry.' : item.error}<div>{(item.error.includes('Permission') || item.error.includes('unapproved') || item.error.includes('already exists'))&&<button type="button" className="chat-secondary-action" onClick={onContext}>Choose project files</button>}</div></div>}
           {item.changes.length>0&&<div className="chat-change-card">
             <div className="chat-change-summary"><strong>{item.changes.length} {item.changes.length===1?'file':'files'}</strong><span>Review in editor</span></div>
             {item.changes.map(change=><button key={change.path} className="chat-change-row" onClick={()=>{onReview(item.id,change);}} title="Review diff in editor"><FileCode2 size={14}/><span>{change.path}</span><small>{change.action}</small><ChevronRight size={13}/></button>)}
