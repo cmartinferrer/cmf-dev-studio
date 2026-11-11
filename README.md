@@ -347,3 +347,21 @@ continues to store full attempt data.
 
 The sandbox reduces risk but cannot guarantee secure execution of malicious
 code; use a suitably isolated Docker host for untrusted generation.
+
+### Understanding test failures and developer corrections
+
+The Rich CLI displays failed pytest test names and their error messages in a
+readable panel. It preserves the complete error text instead of truncating it
+into a single line. After a retry, the mission summary reports how many lines
+were added and removed between the code versions submitted to Docker.
+
+Use `--verbose` to inspect the complete unified code diff (with additions and
+removals), generated pytest tests, and the full pytest output for each attempt:
+
+```bash
+uv run python main.py "Implement a Python function add(a, b) returning their sum" --verbose
+```
+
+These diagnostics are derived from the existing `Mission.history` records and
+do not change agent decisions, retry behavior, or Docker execution. A passing
+test suite does not independently guarantee correctness of generated code.
