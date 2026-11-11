@@ -522,3 +522,52 @@ def test_runner_classifies_timeout_as_infrastructure_error():
     ):
         result = runner.run("pass", "def test_example(): assert True")
     assert result.status is RunnerStatus.INFRASTRUCTURE_ERROR
+
+
+def test_docker_runner_restricts_process_identity_and_ipc():
+    """Verify that generated code runs as a non-root user without shared IPC.
+
+    Restrict the process identity and file descriptor count so the
+    generated program has fewer resources and privileges available.
+    This test only inspects the command; it does not run Docker.
+    """
+    runner = DockerRunner()
+    command = runner.build_command("/tmp/generated-tests")
+
+    assert "--user=10001:10001" in command
+    assert "--ipc=none" in command
+    assert "--ulimit=nofile=64:64" in command
+
+
+def test_docker_runner_disables_python_bytecode_and_pytest_plugin_autoload():
+    """Verify that execution avoids bytecode writes and third-party plugins.
+
+    The mounted workspace is read-only, so Python must not attempt to
+    write bytecode there. Pytest must also avoid loading unrelated
+    plugins from its environment automatically.
+    """
+    runner = DockerRunner()
+    command = runner.build_command("/tmp/generated-tests")
+
+    assert "--env=PYTHONDONTWRITEBYTECODE=1" in command
+    assert "--env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1" in command
+
+
+def test_docker_runner_mounts_only_workspace_as_read_only():
+    """Verify that generated files are the only explicitly mounted host path.
+
+    The runner must not mount the project root, credentials, Docker
+    socket, or arbitrary writable host directories into the container.
+    """
+    runner = DockerRunner()
+    command = runner.build_command("/tmp/generated-tests")
+
+    mount_values = [
+        command[index + 1]
+        for index, argument in enumerate(command[:-1])
+        if argument == "--mount"
+    ]
+    assert len(mount_values) == 1
+    assert mount_values[0].startswith("type=bind,source=")
+    assert mount_values[0].endswith(",target=/workspace,readonly")
+    assert "/var/run/docker.sock" not in " ".join(command)

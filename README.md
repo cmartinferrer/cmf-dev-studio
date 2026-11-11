@@ -150,6 +150,12 @@ Previously generated information remains available for inspection.
 
 **Limitations:** Docker daemon errors are detected using known exit codes and messages; some errors can still be ambiguous. `subprocess.run(timeout=30)` and best-effort cleanup do not provide a proven containment boundary. Do not execute untrusted LLM-generated code until isolation and lifecycle handling are hardened and verified.
 
+## Docker runner hardening
+
+The Docker test runner command uses a non-root UID/GID (`10001:10001`), disables network and IPC access, drops Linux capabilities, disallows privilege escalation, mounts only the generated workspace read-only, limits CPU, memory, PIDs and file descriptors, and disables Python bytecode writes and automatic pytest plugin loading. The Docker image must provide pytest and the configured non-root user.
+
+These settings reduce exposure but **do not make Docker a proven sandbox for hostile code**. The Docker daemon, host filesystem, cleanup failures, timeout semantics, and container escape risks still require security review and a real integration test before running untrusted LLM-generated code. The new unit tests only inspect command arguments and do not start Docker.
+
 ## Development and Testing
 
 Run the complete test suite:
