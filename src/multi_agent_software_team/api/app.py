@@ -53,6 +53,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         data_dir = os.environ.get("STUDIO_DATA_DIR", ".studio-data")
     manager = ProjectManager(data_dir)
     missions = MissionService(manager)
+    missions.recover_interrupted()
     app = FastAPI(title="Multi-Agent Studio API", version="0.1.0")
 
     @app.get("/api/health")

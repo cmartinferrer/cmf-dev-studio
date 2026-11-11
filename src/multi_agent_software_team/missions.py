@@ -54,6 +54,21 @@ class MissionService:
         load_dotenv()
         return Orchestrator(llm=GeminiClient(), runner=DockerTestRunner(), on_event=on_event).run(mission)
 
+    def recover_interrupted(self) -> int:
+        """Mark unfinished runs from a previous server process as failed.
+
+        Call only during API initialization, before accepting new submissions.
+        This does not resume work or terminate an external worker.
+        """
+        with self._db() as db:
+            cursor = db.execute(
+                """UPDATE mission_runs SET status='failed', updated_at=?,
+                   error='Mission interrupted by server restart; start a new mission to retry.'
+                   WHERE status IN ('queued', 'running')""",
+                (_now(),),
+            )
+            return cursor.rowcount
+
     def submit(self, project_id: str, description: str) -> dict:
         if self.manager.get(project_id) is None:
             raise KeyError("Project not found")
