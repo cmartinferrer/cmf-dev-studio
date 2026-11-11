@@ -402,3 +402,43 @@ Run focused tests:
 ```bash
 uv run pytest -v tests/test_project_manager.py
 ```
+
+## Multi-Agent Studio: local REST API (iteration 2)
+
+The project registry is now available through a **local FastAPI backend**. It does
+not invoke Gemini, execute generated code, or change existing repositories.
+
+Install the new Python dependencies and update `uv.lock` on your machine:
+
+```bash
+uv sync
+```
+
+Start the API **bound to localhost only** (do not use `--host 0.0.0.0`):
+
+```bash
+uv run uvicorn multi_agent_software_team.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Open <http://127.0.0.1:8000/docs> for interactive Swagger documentation.
+Data is stored in `.studio-data/` by default; set `STUDIO_DATA_DIR` to override.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/health` | Health check |
+| GET | `/api/projects` | List projects |
+| POST | `/api/projects` | Create an empty managed workspace |
+| POST | `/api/projects/register` | Register an existing local directory (read-only) |
+| GET | `/api/projects/{project_id}` | Retrieve project metadata |
+
+Example JSON for creating a project: `{"name": "Calculator", "description": "Demo"}`.
+To register a directory: `{"path": "/absolute/path/to/repository"}`.
+
+**Security scope:** This API has no authentication and exposes local filesystem
+paths. Keep it on `127.0.0.1` and do not expose it to your network or the
+Internet. Registration does not authorize agent modifications. A later iteration
+will add explicit workspace access controls, safe change review, and execution.
+
+Run the tests with `uv run pytest -v` (Docker integration tests require Docker).
+The current ZIP retains the previous `uv.lock`; `uv sync` regenerates it with
+FastAPI, Uvicorn and HTTPX on the developer machine.
