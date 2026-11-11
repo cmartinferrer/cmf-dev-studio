@@ -567,3 +567,21 @@ If a project changes after a proposal is generated, application stops with a
 conflict rather than overwriting that file. The service attempts rollback on
 write failure, but filesystem operations are not a fully atomic transaction;
 use version control before applying changes.
+
+## Multi-Agent Studio v3.1 — IDE Foundation (preview)
+
+The project workspace now opens as a three-pane IDE: file explorer, Monaco editor,
+AI proposals/context/history. The editor supports tabs, Ctrl+S, creating files,
+removing files with confirmation, and SHA-256 revision checks to prevent accidental
+replacement of files changed on disk. Registered existing repositories require
+explicit manual-edit authorization before saving or deleting. AI proposals still
+use the separate reviewed/tested/apply workflow; the IDE does **not** automatically
+apply AI changes.
+
+After updating the project, run `cd frontend && npm install` (new Monaco packages)
+then `npm run build`. Start FastAPI and Vite as before. Monaco workers are bundled
+locally through Vite, so the editor does not need a CDN at runtime.
+
+The integrated terminal, Git operations, and unified agent workflow are **not yet
+implemented**; those are planned for v3.2–v3.4. The bottom Output panel explicitly
+indicates this. This is a v3.1 preview, not the complete v3 IDE.

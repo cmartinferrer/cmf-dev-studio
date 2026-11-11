@@ -16,6 +16,7 @@ from multi_agent_software_team.missions import MissionService
 from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError
 from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
 from multi_agent_software_team.projects.search import search_files
+from multi_agent_software_team.projects.editor import read_editable, write_editable, delete_editable, EditConflict
 from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
 
 
@@ -127,6 +128,56 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             return read_file(project.path, path)
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    class EditRequest(BaseModel):
+        path: str = Field(min_length=1, max_length=500)
+        content: str = Field(max_length=262144)
+        expected_sha256: str | None = None
+        create: bool = False
+        authorize_existing: bool = False
+
+    class DeleteRequest(BaseModel):
+        path: str = Field(min_length=1, max_length=500)
+        expected_sha256: str
+        authorize_existing: bool = False
+
+    def editable_project(project_id: str, authorize_existing: bool):
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if project.read_only and not authorize_existing:
+            raise HTTPException(status_code=403, detail="Explicit authorization required for existing projects")
+        return project
+
+    @app.get("/api/projects/{project_id}/editor/file")
+    def editor_file(project_id: str, path: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            return read_editable(project.path, path)
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.put("/api/projects/{project_id}/editor/file")
+    def editor_save(project_id: str, request: EditRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        try:
+            return write_editable(project.path, request.path, request.content, request.expected_sha256, create=request.create)
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}/editor/file")
+    def editor_delete(project_id: str, request: DeleteRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        try:
+            return delete_editable(project.path, request.path, request.expected_sha256)
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/insights")
     def project_insights(project_id: str) -> dict:

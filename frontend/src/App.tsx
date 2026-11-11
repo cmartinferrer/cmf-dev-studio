@@ -1,8 +1,5 @@
-import ProposalWorkspace from './ProposalWorkspace';
-import RepositoryInsights from './RepositoryInsights';
 import FolderPicker from './FolderPicker';
-import FileExplorer from './FileExplorer';
-import MissionWorkspace from './MissionWorkspace';
+import IDEWorkspace from './IDEWorkspace';
 import { useEffect, useState } from 'react';
 import { Activity, ArrowRight, Bot, CheckCircle2, ChevronDown, Code2, FileCode2, Folder, FolderOpen, GitBranch, LayoutGrid, Plus, RefreshCw, Search, ShieldCheck, Terminal, X } from 'lucide-react';
 import { createProject, listProjects, registerProject, type Project } from './api';
@@ -54,7 +51,7 @@ export default function App() {
     </aside>
     <main className="main">
       <header className="topbar"><div className="breadcrumb">Workspace <span>/</span> <strong>{active ? active.name : 'Overview'}</strong></div><div className="top-actions"><span className="local-label"><span className="online-dot"/> Local development</span><button className="icon-button" title="Refresh projects" aria-label="Refresh projects" onClick={() => void refresh()}><RefreshCw size={17}/></button><div className="avatar">MS</div></div></header>
-      <div className="content">
+      <div className={active ? "content ide-content" : "content"}>
       {error && <div role="alert" className="alert">{error} <button onClick={() => void refresh()}>Retry</button></div>}
       {!active ? <>
         <div className="hero"><div className="eyebrow"><span className="sparkle">✦</span> YOUR DEVELOPMENT WORKSPACE</div><h1>Build with a team<br/>of <span>AI agents.</span></h1><p>Turn ideas into working software. Create a project, bring your existing code, and build iteratively with an autonomous team.</p><div className="hero-actions"><button className="primary" onClick={() => openModal('create')}><Plus size={17}/> New project</button><button className="secondary" onClick={() => openModal('register')}><FolderOpen size={17}/> Open existing project</button></div><div className="hero-deco"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><Bot size={70}/></div></div>
@@ -62,19 +59,7 @@ export default function App() {
         {loading ? <div className="empty">Loading projects…</div> : filtered.length ? <div className="cards">{filtered.map(p => <button key={p.id} className="project-card" onClick={() => { setSelected(p.id); setWorkspaceTab('files'); setApprovedContext([]); setApprovedDigest(null); }}><div className="card-top"><span className={`file-icon ${p.kind}`}><Folder size={22}/></span><span className="card-arrow"><ArrowRight size={18}/></span></div><strong>{p.name}</strong><p>{p.description || (p.kind === 'existing' ? 'Existing local project' : 'New managed project')}</p><div className="card-footer"><span className="type-tag">{p.kind === 'existing' ? 'Existing · Read only' : 'Managed'}</span><span>{new Date(p.created_at).toLocaleDateString()}</span></div></button>)}</div> : <div className="empty"><FolderOpen size={28}/><strong>{search ? 'No matching projects' : 'No projects yet'}</strong><p>{search ? 'Try a different search.' : 'Create your first project or register an existing folder to get started.'}</p></div>}
         <div className="bottom-section"><div className="section-heading"><div><h2>Your agent team</h2><p>Available in each project workspace.</p></div><span className="soon">READY</span></div><div className="agent-grid"><div className="agent"><div className="agent-icon analyst"><Search size={20}/></div><div><strong>Analyst</strong><p>Breaks down requirements</p></div></div><div className="agent"><div className="agent-icon developer"><Code2 size={20}/></div><div><strong>Developer</strong><p>Writes and improves code</p></div></div><div className="agent"><div className="agent-icon tester"><CheckCircle2 size={20}/></div><div><strong>Tester</strong><p>Validates the solution</p></div></div></div></div>
       </> : <>
-        <button className="back-link" onClick={() => { setSelected(null); setWorkspaceTab('files'); setApprovedContext([]); setApprovedDigest(null); }}>← All projects</button><div className="detail-heading"><div><div className="eyebrow">PROJECT WORKSPACE</div><h1>{active.name}</h1><p>{active.description || 'No description provided'}</p></div><span className="type-tag">{active.kind === 'existing' ? 'Existing · Read only' : 'Managed project'}</span></div>
-        <div className="detail-grid" style={{display:workspaceTab === 'details' ? undefined : 'none'}}><section className="info-panel"><h3><FolderOpen size={19}/> Project details</h3><dl><dt>Local path</dt><dd className="path-text">{active.path}</dd><dt>Project type</dt><dd>{active.kind === 'managed' ? 'Managed workspace' : 'Registered existing repository'}</dd><dt>Access</dt><dd>{active.read_only ? 'Read only (no file modifications)' : 'Managed directory'}</dd><dt>Created</dt><dd>{new Date(active.created_at).toLocaleString()}</dd><dt>Project ID</dt><dd className="mono">{active.id}</dd></dl></section><section className="info-panel roadmap"><h3><GitBranch size={19}/> Workspace capabilities</h3><div className="capability"><CheckCircle2 size={17} className="done"/><span>Project registered and persisted</span></div><div className="capability"><CheckCircle2 size={17} className="done"/><span>Project details available via REST API</span></div><div className="capability muted"><FileCode2 size={17}/><span>Read-only file explorer <em>Available below</em></span></div><div className="capability muted"><Activity size={17}/><span>Mission execution and history <em>Available below</em></span></div><div className="capability muted"><Terminal size={17}/><span>Tests and revision history <em>Planned</em></span></div></section></div>
-        <nav className="workspace-tabs" aria-label="Project workspace sections">
-          <button className={workspaceTab === 'files' ? 'selected' : ''} onClick={() => setWorkspaceTab('files')}><FileCode2 size={17}/> Files</button>
-          <button className={workspaceTab === 'insights' ? 'selected' : ''} onClick={() => setWorkspaceTab('insights')}><Search size={17}/> Repository Insights</button>
-          <button className={workspaceTab === 'missions' ? 'selected' : ''} onClick={() => setWorkspaceTab('missions')}><Bot size={17}/> Agent missions</button>
-          <button className={workspaceTab === 'proposals' ? 'selected' : ''} onClick={() => setWorkspaceTab('proposals')}><GitBranch size={17}/> Workspace proposals</button>
-          <button className={workspaceTab === 'details' ? 'selected' : ''} onClick={() => setWorkspaceTab('details')}><GitBranch size={17}/> Project details</button>
-        </nav>
-        {workspaceTab === 'files' && <FileExplorer key={active.id} projectId={active.id} />}
-        {workspaceTab === 'insights' && <RepositoryInsights key={active.id} projectId={active.id} approved={approvedContext} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} onGoToMissions={() => setWorkspaceTab('missions')} onGoToProposals={() => setWorkspaceTab('proposals')} />}
-        {workspaceTab === 'proposals' && <ProposalWorkspace key={active.id} projectId={active.id} contextPaths={approvedContext} contextDigest={approvedDigest} projectKind={active.kind} />}
-        {workspaceTab === 'missions' && <MissionWorkspace key={active.id} projectId={active.id} contextPaths={approvedContext} contextDigest={approvedDigest} />}
+        <IDEWorkspace key={active.id} project={active} approved={approvedContext} digest={approvedDigest} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} />
       </>}
       </div>
     </main>
