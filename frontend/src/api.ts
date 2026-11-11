@@ -22,3 +22,9 @@ export const listMissions = (projectId: string) => request<MissionRun[]>(`/proje
 export const startMission = (projectId: string, description: string) => request<MissionRun>(`/projects/${encodeURIComponent(projectId)}/missions`, { method: 'POST', body: JSON.stringify({ description }) });
 export const getMission = (runId: string) => request<MissionRun>(`/missions/${encodeURIComponent(runId)}`);
 export const listMissionEvents = (runId: string) => request<MissionEvent[]>(`/missions/${encodeURIComponent(runId)}/events`);
+
+export type FileEntry = { name: string; path: string; kind: 'file' | 'directory' };
+export type DirectoryListing = { path: string; entries: FileEntry[]; truncated: boolean };
+export type FilePreview = { path: string; content: string; size: number };
+export const listProjectFiles = (projectId: string, path = '') => request<DirectoryListing>(`/projects/${encodeURIComponent(projectId)}/files?path=${encodeURIComponent(path)}`);
+export const readProjectFile = (projectId: string, path: string) => request<FilePreview>(`/projects/${encodeURIComponent(projectId)}/file?path=${encodeURIComponent(path)}`);

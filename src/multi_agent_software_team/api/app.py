@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
 from multi_agent_software_team.projects import Project, ProjectManager
+from multi_agent_software_team.projects.explorer import ExplorerError, list_directory, read_file
 from multi_agent_software_team.missions import MissionService
 
 
@@ -84,6 +85,26 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
+
+    @app.get("/api/projects/{project_id}/files")
+    def project_files(project_id: str, path: str = "") -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            return list_directory(project.path, path)
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/file")
+    def project_file(project_id: str, path: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            return read_file(project.path, path)
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     class MissionRequest(BaseModel):
         description: str = Field(min_length=1, max_length=10000)
