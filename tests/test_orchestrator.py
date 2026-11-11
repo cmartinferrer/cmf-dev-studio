@@ -8,17 +8,15 @@ from multi_agent_software_team.orchestrator import Orchestrator
 
 
 def create_mock_llm() -> Mock:
-    """Create a mock LLM client for the multi-agent workflow.
+    """Create a mock LLM client for the complete multi-agent workflow.
 
-    The mock returns different responses for successive LLM calls:
-    - First call: software requirements for the analyst.
-    - Second call: Python source code for the developer.
+    The mock returns a different response for each agent:
+    1. Analyst: software requirements.
+    2. Developer: Python implementation.
+    3. Tester: pytest test cases.
 
-    This keeps integration tests deterministic and avoids real
-    external API requests.
-
-    Returns:
-        A configured mock implementing the LLMClient interface.
+    This keeps integration tests deterministic and avoids
+    external API calls.
     """
     llm = Mock(spec=LLMClient)
 
@@ -34,6 +32,13 @@ def create_mock_llm() -> Mock:
             "        return False\n"
             "    return all(number % divisor != 0 "
             "for divisor in range(2, number))\n"
+        ),
+        (
+            "from solution import is_prime\n\n"
+            "def test_prime_number():\n"
+            "    assert is_prime(7) is True\n\n"
+            "def test_non_prime_number():\n"
+            "    assert is_prime(4) is False\n"
         ),
     ]
 
@@ -146,8 +151,9 @@ def test_orchestrator_produces_complete_mission_output():
     assert result.tests.strip()
     assert result.status == MissionStatus.COMPLETED
 
-    assert llm.generate.call_count == 2
+    assert llm.generate.call_count == 3    
     assert "def is_prime(" in result.code
+    assert "def test_prime_number(" in result.tests
 
 
 def test_orchestrator_marks_mission_as_failed_when_analyst_fails():
@@ -233,6 +239,11 @@ def test_orchestrator_passes_analyst_requirements_to_developer():
     llm.generate.side_effect = [
         "Accept two integers\nReturn their sum",
         "def add(a: int, b: int) -> int:\n    return a + b\n",
+        (
+            "from solution import add\n\n"
+            "def test_add():\n"
+            "    assert add(2, 3) == 5\n"
+        ),
     ]
 
     mission = Mission(
@@ -251,9 +262,53 @@ def test_orchestrator_passes_analyst_requirements_to_developer():
 
     assert "def add(" in result.code
 
-    assert llm.generate.call_count == 2
+    assert llm.generate.call_count == 3
 
     developer_prompt = llm.generate.call_args_list[1].args[0]
 
     assert "Accept two integers" in developer_prompt
     assert "Return their sum" in developer_prompt
+
+def test_orchestrator_passes_generated_code_to_tester():
+    """Verify that the tester receives the developer's generated code.
+
+    The workflow must:
+    - Generate requirements using the analyst.
+    - Generate Python code using the developer.
+    - Generate pytest tests using the tester.
+
+    All three agents must share the same Mission instance and
+    use the injected LLM client.
+    """
+    llm = Mock(spec=LLMClient)
+    llm.generate.side_effect = [
+        "Accept two integers\nReturn their sum",
+        "def add(a: int, b: int) -> int:\n    return a + b\n",
+        (
+            "from solution import add\n\n"
+            "def test_add():\n"
+            "    assert add(2, 3) == 5\n"
+        ),
+    ]
+
+    mission = Mission(
+        description="Create a function that adds two integers"
+    )
+
+    orchestrator = Orchestrator(llm=llm)
+    result = orchestrator.run(mission)
+
+    assert result.status == MissionStatus.COMPLETED
+    assert result.requirements == [
+        "Accept two integers",
+        "Return their sum",
+    ]
+    assert "def add(" in result.code
+    assert "def test_add(" in result.tests
+
+    assert llm.generate.call_count == 3
+
+    tester_prompt = llm.generate.call_args_list[2].args[0]
+
+    assert result.code in tester_prompt
+    assert "Return their sum" in tester_prompt

@@ -10,11 +10,11 @@ class Orchestrator:
         """Initialize the agents with their required dependencies.
 
         Args:
-            llm: Language model client shared by LLM-powered agents.
+            llm: Language model client shared by all three agents.
         """
         self.analyst = AnalystAgent(llm=llm)
         self.developer = DeveloperAgent(llm=llm)
-        self.tester = TesterAgent()
+        self.tester = TesterAgent(llm=llm)
 
     def run(self, mission: Mission) -> Mission:
         """Execute the multi-agent workflow and manage mission status.

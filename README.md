@@ -9,17 +9,16 @@ The project is developed incrementally to explore multi-agent orchestration, sha
 - **Mission management:** Shared mission state using Python dataclasses.
 - **Analyst Agent:** Generates software requirements dynamically using Google Gemini.
 - **Developer Agent:** Generates Python implementations dynamically using Google Gemini and the analyst's requirements.
-- **Tester Agent:** Generates predefined pytest tests for the implementation.
+- **Tester Agent:** Generates pytest tests dynamically using Google Gemini, based on the mission requirements and generated implementation.
 - **Orchestrator:** Coordinates agents sequentially, manages mission status, and handles execution failures.
 - **LLM abstraction:** Uses an `LLMClient` protocol to decouple agents from specific providers.
 - **Gemini integration:** Uses the official Google GenAI SDK.
 - **CLI entry point:** Runs an example mission and displays its results.
 - **Automated testing:** Uses pytest and mocks to validate application behavior without external API calls.
 
-> **Current limitations:** The Analyst and Developer agents use an LLM.
-> The Tester agent still generates predefined tests.
-> Generated tests are not executed automatically, and mission completion
-> does not yet imply that the generated code has been validated.
+> **Current limitations:** All three agents use an LLM, but generated
+> code and tests are not executed or validated automatically.
+> Mission completion only indicates that the agents finished successfully.
 
 ## Architecture
 
@@ -93,9 +92,9 @@ uv run python main.py
 
 The orchestrator executes the following workflow:
 
-1. **AnalystAgent:** Analyzes the mission and generates requirements using Gemini.
+1. **AnalystAgent:** Generates software requirements using Gemini.
 2. **DeveloperAgent:** Generates Python code using Gemini and the analyst's requirements.
-3. **TesterAgent:** Generates predefined pytest tests.
+3. **TesterAgent:** Generates pytest tests using Gemini, the requirements, and the implementation.
 
 The resulting mission contains the requirements, generated code, tests, and execution status.
 
@@ -117,7 +116,7 @@ Agents receive the LLM client through dependency injection, allowing the provide
 
 This design also enables deterministic unit testing through mocked LLM responses.
 
-Currently, both AnalystAgent and DeveloperAgent use this integration.
+All three agents use the same LLMClient abstraction through dependency injection.
 
 ## Mission Lifecycle and Error Handling
 
@@ -169,7 +168,6 @@ The current implementation demonstrates:
 
 ### Planned Improvements
 
-- Integrate LLM-based test generation into TesterAgent.
 - Execute generated tests in an isolated environment.
 - Introduce feedback loops between TesterAgent and DeveloperAgent.
 - Implement configurable retry policies.
