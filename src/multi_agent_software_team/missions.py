@@ -3,6 +3,7 @@
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from multi_agent_software_team.projects.intelligence import prepare_context, format_context
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,12 +70,19 @@ class MissionService:
             )
             return cursor.rowcount
 
-    def submit(self, project_id: str, description: str) -> dict:
+    def submit(self, project_id: str, description: str, context_paths: list[str] | None = None, context_digest: str | None = None) -> dict:
         if self.manager.get(project_id) is None:
             raise KeyError("Project not found")
         description = description.strip()
         if not description or len(description) > 10000:
             raise ValueError("Mission description must be between 1 and 10000 characters")
+        project = self.manager.get(project_id)
+        # Read only files explicitly approved by the user, before queueing.
+        # Context is passed in-memory to the worker; never persisted in mission_runs.
+        context = prepare_context(project.path, context_paths or [])
+        if context_paths and (not context_digest or context_digest != context['digest']):
+            raise ValueError('Repository files changed or were not approved; review context again')
+        execution_description = description + format_context(context)
         run_id, now = str(uuid4()), _now()
         with self._lock:
             try:
@@ -83,7 +91,7 @@ class MissionService:
                                (run_id, project_id, description, "queued", now, now))
             except sqlite3.IntegrityError as exc:
                 raise ValueError("A mission is already active for this project") from exc
-        self._pool.submit(self._run, run_id, description)
+        self._pool.submit(self._run, run_id, execution_description)
         return self.get(run_id)
 
     def _run(self, run_id: str, description: str) -> None:

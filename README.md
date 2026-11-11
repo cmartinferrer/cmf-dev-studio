@@ -492,3 +492,34 @@ Only one queued/running mission is allowed per project. Runs use Gemini and the 
 - Filename search inspects up to 5,000 entries and returns up to 100 results; it ignores hidden files, symlinks and dependency/build folders. No file content is sent by search.
 
 For local validation: `uv run pytest -q -m 'not integration'`, then `cd frontend && npm install && npm run build`. Run FastAPI and `npm run dev` to verify the folder picker, tabs, search, and preview. Do not commit until functional checks pass.
+
+## Repository Intelligence v1 (read-only)
+
+The **Repository Insights** tab inventories source file names, language extensions,
+and recognized manifests without sending repository contents to Gemini. Select up to
+8 source files, click **Review selected content**, inspect the full preview, then
+**Approve & go to missions**. The approved file paths and a SHA-256 fingerprint
+are submitted with the next mission. The API rereads and checks the files against
+the approved fingerprint before starting, and includes the selected contents as
+reference code for Analyst, Developer and Tester. The source files are never
+modified. If any file changes, review and approve the selection again.
+
+Endpoints:
+
+- `GET /api/projects/{project_id}/insights`
+- `POST /api/projects/{project_id}/context/preview` with `{"paths": ["src/main.py"]}`
+- `POST /api/projects/{project_id}/missions` accepts optional `context_paths`
+  and `context_digest` from the preview. Missions without context work as before.
+
+**Safety and limitations:** inventory is bounded to 3,000 visited entries and
+160 candidate files. Context is limited to 8 files, 12 KiB each, 32 KiB total;
+only selected source-code extensions are accepted. Hidden paths, symlinks,
+known generated directories, suspicious names and common credential patterns are
+excluded. These are *best-effort* protections, not a guarantee that a source file
+contains no private information. Always review the exact preview before approval.
+Do not approve confidential or proprietary code for an external model unless you
+have permission to share it. Context is passed in-memory to the execution worker,
+not stored verbatim in the mission description; however, generated model output
+and mission events may include portions of it. The Gemini provider processes
+approved content externally. The implementation still generates standalone code
+and tests; it does not edit or apply patches to registered projects.

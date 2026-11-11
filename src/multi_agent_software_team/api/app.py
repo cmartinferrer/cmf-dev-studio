@@ -15,6 +15,7 @@ from multi_agent_software_team.projects.explorer import ExplorerError, list_dire
 from multi_agent_software_team.missions import MissionService
 from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
 from multi_agent_software_team.projects.search import search_files
+from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
 
 
 class ProjectResponse(BaseModel):
@@ -125,16 +126,38 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/projects/{project_id}/insights")
+    def project_insights(project_id: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return analyze_repository(project.path)
+
+    class ContextRequest(BaseModel):
+        paths: list[str] = Field(default_factory=list, max_length=8)
+
+    @app.post("/api/projects/{project_id}/context/preview")
+    def context_preview(project_id: str, request: ContextRequest) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        try:
+            return prepare_context(project.path, request.paths)
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     class MissionRequest(BaseModel):
         description: str = Field(min_length=1, max_length=10000)
+        context_paths: list[str] = Field(default_factory=list, max_length=8)
+        context_digest: str | None = None
 
     @app.post("/api/projects/{project_id}/missions", status_code=status.HTTP_202_ACCEPTED)
     def start_mission(project_id: str, request: MissionRequest) -> dict:
         try:
-            return missions.submit(project_id, request.description)
+            return missions.submit(project_id, request.description, request.context_paths, request.context_digest)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except ValueError as exc:
+        except (ValueError, ExplorerError, OSError) as exc:
             code = 409 if "already active" in str(exc) else 422
             raise HTTPException(status_code=code, detail=str(exc)) from exc
 

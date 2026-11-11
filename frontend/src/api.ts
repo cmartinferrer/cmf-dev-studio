@@ -19,7 +19,7 @@ export type MissionResult = { requirements: string[] | string; code: string; tes
 export type MissionRun = { id: string; project_id: string; description: string; status: MissionStatus; created_at: string; updated_at: string; result: MissionResult | null; error: string };
 export type MissionEvent = { id: number; occurred_at: string; type: string; agent: string | null; attempt: number | null; max_attempts: number | null; status: string | null; passed: number | null; failed: number | null; message: string };
 export const listMissions = (projectId: string) => request<MissionRun[]>(`/projects/${encodeURIComponent(projectId)}/missions`);
-export const startMission = (projectId: string, description: string) => request<MissionRun>(`/projects/${encodeURIComponent(projectId)}/missions`, { method: 'POST', body: JSON.stringify({ description }) });
+export const startMission = (projectId: string, description: string, contextPaths: string[] = [], contextDigest: string | null = null) => request<MissionRun>(`/projects/${encodeURIComponent(projectId)}/missions`, { method: 'POST', body: JSON.stringify({ description, context_paths: contextPaths, context_digest: contextDigest }) });
 export const getMission = (runId: string) => request<MissionRun>(`/missions/${encodeURIComponent(runId)}`);
 export const listMissionEvents = (runId: string) => request<MissionEvent[]>(`/missions/${encodeURIComponent(runId)}/events`);
 
@@ -33,3 +33,8 @@ export type FolderListing = { root: string; path: string; parent: string | null;
 export const browseLocalDirectories = (path = '') => request<FolderListing>(`/local/directories?path=${encodeURIComponent(path)}`);
 export type FileSearchResult = { query: string; entries: FileEntry[]; truncated: boolean };
 export const searchProjectFiles = (projectId: string, query: string) => request<FileSearchResult>(`/projects/${encodeURIComponent(projectId)}/search?q=${encodeURIComponent(query)}`);
+
+export type RepositoryInsights = { technologies: string[]; languages: Record<string, number>; candidates: { path: string; size: number }[]; truncated: boolean; visited: number; limits: { max_files: number; max_file_bytes: number; max_total_bytes: number } };
+export type ContextPreview = { files: { path: string; content: string; size: number }[]; total_bytes: number; digest: string };
+export const getRepositoryInsights = (projectId: string) => request<RepositoryInsights>(`/projects/${encodeURIComponent(projectId)}/insights`);
+export const previewRepositoryContext = (projectId: string, paths: string[]) => request<ContextPreview>(`/projects/${encodeURIComponent(projectId)}/context/preview`, { method: 'POST', body: JSON.stringify({ paths }) });

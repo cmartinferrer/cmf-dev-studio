@@ -5,7 +5,7 @@ import { getMission, listMissionEvents, listMissions, startMission, type Mission
 const activeStatus = (status: string) => status === 'queued' || status === 'running';
 const formatTime = (value: string) => new Date(value).toLocaleString();
 
-export default function MissionWorkspace({ projectId }: { projectId: string }) {
+export default function MissionWorkspace({ projectId, contextPaths = [], contextDigest = null }: { projectId: string; contextPaths?: string[]; contextDigest?: string | null }) {
   const [runs, setRuns] = useState<MissionRun[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [run, setRun] = useState<MissionRun | null>(null);
@@ -49,7 +49,7 @@ export default function MissionWorkspace({ projectId }: { projectId: string }) {
     if (!description.trim() || submitting) return;
     setSubmitting(true); setError('');
     try {
-      const created = await startMission(projectId, description.trim());
+      const created = await startMission(projectId, description.trim(), contextPaths, contextDigest);
       setRuns(current => [created, ...current]);
       setSelectedId(created.id); setDescription('');
     } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
@@ -62,6 +62,7 @@ export default function MissionWorkspace({ projectId }: { projectId: string }) {
     <div className="section-heading"><div><h2><Activity size={19}/> Agent missions</h2><p>Run tasks with Analyst, Developer and Tester. Generated code stays in mission history; project files are not modified.</p></div></div>
     <form className="mission-form" onSubmit={e => void createMission(e)}>
       <label htmlFor="mission-description">New mission</label>
+      <p className="mission-muted">{contextPaths.length ? `Approved repository context: ${contextPaths.join(', ')}. These files will be sent to Gemini.` : 'No repository files approved. Mission runs without repository context.'}</p>
       <textarea id="mission-description" rows={3} maxLength={10000} value={description} onChange={e => setDescription(e.target.value)} placeholder="Describe what the agent team should implement and test…" required />
       <div className="mission-form-footer"><span>{running ? 'A mission is already active for this project.' : 'Execution uses Gemini and Docker; review generated output before using it.'}</span><button type="submit" className="primary" disabled={submitting || running || !description.trim()}><Play size={15}/>{submitting ? 'Starting…' : 'Run mission'}</button></div>
     </form>
