@@ -1,6 +1,8 @@
 import subprocess
 
 from unittest.mock import patch
+from unittest.mock import patch
+from subprocess import CompletedProcess
 
 from multi_agent_software_team.runner.docker import DockerTestRunner as DockerRunner
 from multi_agent_software_team.runner.models import TestStatus as RunnerStatus
@@ -571,3 +573,38 @@ def test_docker_runner_mounts_only_workspace_as_read_only():
     assert mount_values[0].startswith("type=bind,source=")
     assert mount_values[0].endswith(",target=/workspace,readonly")
     assert "/var/run/docker.sock" not in " ".join(command)
+
+def test_container_exists_returns_false_for_missing_container():
+    """Recognize Docker's 'No such container' response."""
+    runner = DockerRunner()
+
+    process = CompletedProcess(
+        args=["docker", "container", "inspect"],
+        returncode=1,
+        stdout="",
+        stderr="Error: No such container: test-container",
+    )
+
+    with patch(
+        "multi_agent_software_team.runner.docker.subprocess.run",
+        return_value=process,
+    ):
+        assert runner.container_exists("test-container") is False
+
+
+def test_container_exists_returns_none_for_unknown_docker_error():
+    """Do not treat an unknown Docker error as successful cleanup."""
+    runner = DockerRunner()
+
+    process = CompletedProcess(
+        args=["docker", "container", "inspect"],
+        returncode=1,
+        stdout="",
+        stderr="Cannot connect to the Docker daemon",
+    )
+
+    with patch(
+        "multi_agent_software_team.runner.docker.subprocess.run",
+        return_value=process,
+    ):
+        assert runner.container_exists("test-container") is None

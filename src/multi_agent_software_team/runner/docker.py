@@ -116,7 +116,13 @@ class DockerTestRunner:
         Returns:
             A TestResult describing the execution and cleanup outcome.
         """
-        with tempfile.TemporaryDirectory(prefix="multi-agent-tests-") as directory:
+        workspace_root = Path.cwd() / ".runner-workspaces"
+        workspace_root.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(
+            prefix="multi-agent-tests-",
+            dir=workspace_root,
+        ) as directory:
             workspace = Path(directory)
 
             self.prepare_workspace(
@@ -256,7 +262,12 @@ class DockerTestRunner:
         if process.returncode == 0:
             return True
 
-        if "no such object" in process.stderr.lower():
+        error_message = process.stderr.lower()
+
+        if any(
+            marker in error_message
+            for marker in ("no such object", "no such container")
+        ):
             return False
 
         return None
