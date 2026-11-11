@@ -17,7 +17,7 @@ MAX_CONTEXT_FILES = 8
 MAX_FILE_BYTES = 12 * 1024
 MAX_CONTEXT_BYTES = 32 * 1024
 
-# Allowlist deliberately excludes configuration, keys, local env, credentials and lockfiles.
+# Explicitly allow known build manifests; reject credentials and unrecognized configuration.
 SOURCE_EXTENSIONS = {'.py', '.java', '.kt', '.js', '.jsx', '.ts', '.tsx', '.go', '.rs', '.swift', '.md'}
 MANIFESTS = {'pyproject.toml': 'Python / pyproject', 'pom.xml': 'Java / Maven',
              'build.gradle': 'Java / Gradle', 'build.gradle.kts': 'Kotlin / Gradle',
@@ -46,7 +46,7 @@ def credential_findings(content: str) -> list[tuple[int, str]]:
 
 
 def _eligible(path: Path) -> bool:
-    return path.suffix.lower() in SOURCE_EXTENSIONS and not SENSITIVE.search(path.name)
+    return (path.name in MANIFESTS or path.suffix.lower() in SOURCE_EXTENSIONS) and not SENSITIVE.search(path.name)
 
 
 def analyze_repository(root: Path) -> dict:

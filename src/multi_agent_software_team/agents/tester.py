@@ -1,5 +1,6 @@
 from multi_agent_software_team.llm.client import LLMClient
 from multi_agent_software_team.models import Mission
+from multi_agent_software_team.workflow import acceptance_guidance
 
 
 class TesterAgent:
@@ -36,6 +37,7 @@ class TesterAgent:
             "You are an experienced Python QA engineer.\n"
             "Write pytest unit tests for the following Python implementation.\n"
             "The tests must validate the software requirements.\n"
+            + acceptance_guidance() + "\n"
             "Include normal cases, edge cases, and error cases.\n"
             "Do not invent requirements or reject valid Python behavior "
             "unless the task explicitly requires it.\n"

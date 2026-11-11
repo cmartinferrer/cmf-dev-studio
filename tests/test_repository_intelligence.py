@@ -16,7 +16,7 @@ def test_inventory_is_bounded_and_ignores_secrets(tmp_path: Path):
     (tmp_path / 'secrets' / 'other.py').write_text('private')
     info = analyze_repository(tmp_path)
     assert info['technologies'] == ['Python / pyproject']
-    assert [entry['path'] for entry in info['candidates']] == ['main.py']
+    assert [entry['path'] for entry in info['candidates']] == ['main.py', 'pyproject.toml']
 
 
 def test_explicit_selection_and_secret_scanning(tmp_path: Path):

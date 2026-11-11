@@ -8,6 +8,7 @@ from multi_agent_software_team.llm.client import LLMClient
 from multi_agent_software_team.models import ExecutionAttempt, Mission, MissionStatus
 from multi_agent_software_team.runner.client import TestRunner
 from multi_agent_software_team.runner.models import TestResult, TestStatus
+from multi_agent_software_team.workflow import WorkflowPolicy
 
 
 class Orchestrator:
@@ -32,6 +33,7 @@ class Orchestrator:
         """
         if max_attempts < 1:
             raise ValueError("max_attempts must be at least 1")
+        self.policy = WorkflowPolicy(max_attempts)
 
         self.analyst = AnalystAgent(llm=llm)
         self.developer = DeveloperAgent(llm=llm)
@@ -89,8 +91,7 @@ class Orchestrator:
 
                     if mission.status is MissionStatus.FAILED:
                         if (
-                            result.status is TestStatus.TEST_FAILED
-                            and attempt + 1 < self.max_attempts
+                            self.policy.can_retry(mission.attempts, recoverable=result.status is TestStatus.TEST_FAILED)
                         ):
                             mission.status = MissionStatus.IN_PROGRESS
                             self._emit(EventType.RETRY_STARTED, attempt=mission.attempts + 1, max_attempts=self.max_attempts)
