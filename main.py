@@ -1,34 +1,7 @@
-from dotenv import load_dotenv
-from multi_agent_software_team.llm.gemini import GeminiClient
-from multi_agent_software_team.models import Mission
-from multi_agent_software_team.orchestrator import Orchestrator
+"""Convenience entry point for running the project from its repository."""
 
-def main() -> None:
-    """Run an example mission using Gemini for requirements analysis."""
-
-    load_dotenv()
-    
-    mission = Mission(
-        description=(
-            "Create a Python function called calculate_factorial "
-            "that accepts a non-negative integer and returns its factorial. "
-            "Raise ValueError for negative numbers."
-        )
-    )
-
-    orchestrator = Orchestrator(llm=GeminiClient())
-    result = orchestrator.run(mission)
-
-    print("\nMission result:")
-    print(f"Status: {result.status.value}")
-    print("\nRequirements:")
-
-    for requirement in result.requirements:
-        print(f"- {requirement}")
-
-    print(f"\nGenerated code:\n{result.code}")
-    print(f"\nGenerated tests:\n{result.tests}")
+from multi_agent_software_team.cli import main
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

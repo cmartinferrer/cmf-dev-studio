@@ -124,6 +124,9 @@ class DockerTestRunner:
             dir=workspace_root,
         ) as directory:
             workspace = Path(directory)
+            # TemporaryDirectory uses mode 0700. The non-root container
+            # user needs traversal permission for the read-only bind mount.
+            workspace.chmod(0o755)
 
             self.prepare_workspace(
                 workspace=workspace,

@@ -38,6 +38,8 @@ class TesterAgent:
             "Write pytest unit tests for the following Python implementation.\n"
             "The tests must validate the software requirements.\n"
             "Include normal cases, edge cases, and error cases.\n"
+            "Do not invent requirements or reject valid Python behavior "
+            "unless the task explicitly requires it.\n"
             "Import the functions under test from a module named solution.\n"
             "Return only valid Python source code.\n"
             "Do not include Markdown code fences or explanations.\n\n"

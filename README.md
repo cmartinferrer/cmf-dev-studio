@@ -16,10 +16,10 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 - **Test runner abstraction:** Uses a `TestRunner` protocol to decouple orchestration from the execution environment.
 - **Docker Test Runner:** Independently executes Python code and pytest tests inside a restricted Docker container.
 - **Execution results:** Distinguishes successful tests, test failures, and Docker infrastructure errors.
-- **CLI entry point:** Runs an example mission and displays its results.
+- **CLI entry point:** Accepts user missions, runs the complete agent pipeline, and executes generated code and tests in Docker by default.
 - **Automated testing:** Includes mocked unit tests and integration tests using real Docker containers with predefined, trusted code.
 
-> **Current limitation:** The orchestrator can use an injected `TestRunner`, but the CLI does not configure one. LLM-generated code is not automatically executed. Docker isolation has not been approved as a security boundary for untrusted code.
+> **Security:** Docker execution is enabled by default for a complete end-to-end workflow. The restrictions reduce exposure but do not guarantee protection from malicious code. Use `--generate-only` to disable execution.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 
 The orchestrator coordinates three specialized agents: `AnalystAgent` generates requirements, `DeveloperAgent` produces an implementation, and `TesterAgent` generates pytest tests. They share a single `Mission` object containing the mission description, requirements, code, tests, feedback, attempt count, and status.
 
-The agents use the `LLMClient` abstraction to communicate with Gemini. An optional `TestRunner` can validate the generated code after all agents finish. On test failures, the developer may regenerate the implementation using feedback while the original tests remain unchanged. **In the CLI, no runner is configured**, so the example workflow only generates code and tests.
+The agents use the `LLMClient` abstraction to communicate with Gemini. An optional `TestRunner` can validate the generated code after all agents finish. On test failures, the developer may regenerate the implementation using feedback while the original tests remain unchanged. **The CLI connects the runner by default**; `--generate-only` disables execution.
 
 ## Requirements
 
@@ -102,7 +102,7 @@ Run the example mission:
 uv run python main.py
 ```
 
-The orchestrator runs `AnalystAgent`, `DeveloperAgent`, and `TesterAgent` sequentially. The resulting mission contains requirements, generated code, tests, and execution status. The CLI displays the generated artifacts but does not run them.
+The orchestrator runs `AnalystAgent`, `DeveloperAgent`, and `TesterAgent` sequentially. The resulting mission contains requirements, generated code, tests, and execution status. The CLI executes generated tests in Docker by default and displays their results.
 
 ## LLM Integration
 
@@ -273,7 +273,7 @@ The integration tests verify execution of trusted Python code, classification of
 uv run pytest -v
 ```
 
-The last confirmed baseline before optional orchestrator-runner integration was **69 unit tests and 2 Docker integration tests passing**. The new orchestrator tests must be run locally before recording an updated total.
+The full test suite includes unit tests and Docker integration tests. Run `uv run pytest -v` locally to verify both.
 
 ## Project Status
 
@@ -292,3 +292,34 @@ Implemented: shared mission state, sequential multi-agent orchestration, Gemini 
 ## License
 
 Not yet specified.
+
+## Complete end-to-end CLI (default)
+
+The CLI runs the entire workflow: user task -> Gemini -> Analyst -> Developer
+-> Tester -> Docker/pytest -> feedback -> Developer retries -> final result.
+
+```bash
+# Build the test image once (Docker must be running).
+docker build -t multi-agent-test-runner:latest -f docker/test-runner.Dockerfile .
+
+# Full workflow with a custom task:
+uv run python main.py "Implement a Python function add(a, b) returning their sum"
+
+# Equivalent installed command:
+uv run multi-agent-software-team "Implement a Python function add(a, b) returning their sum"
+
+# Generate code without running it:
+uv run python main.py --generate-only "Implement add(a, b)"
+
+# Run the complete integration with a deterministic fake LLM and real Docker:
+uv run pytest -v tests/integration/test_full_workflow_integration.py
+
+# Run all tests:
+uv run pytest -v
+```
+
+Docker restrictions include a non-root container, no network, a read-only
+filesystem and workspace, dropped Linux capabilities, resource limits, and a
+process timeout. The Docker socket and home directory are not mounted.
+**This is risk reduction, not a guarantee against malicious generated code.**
+Do not grant the container elevated privileges or mount sensitive files.
