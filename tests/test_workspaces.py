@@ -75,3 +75,27 @@ def test_existing_project_proposal_preserves_original(tmp_path):
     assert '-answer = 1' in proposal['changes'][0]['diff']
     assert '+answer = 2' in proposal['changes'][0]['diff']
     assert (source/'main.py').read_text() == 'answer = 1\n'
+
+def test_proposal_diff_preview_is_read_only_and_detects_conflicts(tmp_path):
+    client = TestClient(create_app(tmp_path / 'data'))
+    source = tmp_path / 'source'; source.mkdir()
+    (source / 'main.py').write_text('answer = 1\n')
+    project = client.post('/api/projects/register', json={'path': str(source)}).json()
+    context = client.post(f"/api/projects/{project['id']}/context/preview", json={'paths': ['main.py']}).json()
+    with fake_gemini(json.dumps({'operations': [{'action': 'modify', 'path': 'main.py', 'content': 'answer = 2\n'}]})):
+        created = client.post(f"/api/projects/{project['id']}/proposals", json={
+            'task': 'Update answer', 'context_paths': ['main.py'], 'context_digest': context['digest']
+        }).json()
+        for _ in range(100):
+            proposal = client.get(f"/api/proposals/{created['id']}").json()
+            if proposal['status'] in ('ready', 'failed'): break
+            time.sleep(.02)
+    assert proposal['status'] == 'ready'
+    result = client.get(f"/api/proposals/{created['id']}/preview", params={'path': 'main.py'})
+    assert result.status_code == 200, result.text
+    assert result.json()['before'] == 'answer = 1\n'
+    assert result.json()['after'] == 'answer = 2\n'
+    assert (source / 'main.py').read_text() == 'answer = 1\n'
+    assert client.get(f"/api/proposals/{created['id']}/preview", params={'path': '../secret.py'}).status_code == 409
+    (source / 'main.py').write_text('answer = 99\n')
+    assert client.get(f"/api/proposals/{created['id']}/preview", params={'path': 'main.py'}).status_code == 409

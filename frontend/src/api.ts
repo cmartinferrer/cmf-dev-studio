@@ -52,3 +52,5 @@ export type EditableFile = FilePreview & { sha256: string };
 export const openEditableFile = (projectId: string, path: string) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file?path=${encodeURIComponent(path)}`);
 export const saveEditableFile = (projectId: string, path: string, content: string, expected_sha256: string | null, create: boolean, authorize_existing: boolean) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'PUT',body:JSON.stringify({path,content,expected_sha256,create,authorize_existing})});
 export const deleteEditableFile = (projectId: string, path: string, expected_sha256: string, authorize_existing: boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'DELETE',body:JSON.stringify({path,expected_sha256,authorize_existing})});
+
+export const previewProposalFile = (proposalId: string, path: string) => request<{path:string;before:string;after:string}>(`/proposals/${encodeURIComponent(proposalId)}/preview?path=${encodeURIComponent(path)}`);

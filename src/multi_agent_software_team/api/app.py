@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, WebSocket
+from multi_agent_software_team.api.terminal import terminal_socket
 from pydantic import BaseModel, Field
 
 from multi_agent_software_team.projects import Project, ProjectManager
@@ -62,6 +63,10 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     workspaces = WorkspaceService(manager)
     missions.recover_interrupted()
     app = FastAPI(title="Multi-Agent Studio API", version="0.1.0")
+
+    @app.websocket("/api/projects/{project_id}/terminal")
+    async def project_terminal(websocket: WebSocket, project_id: str) -> None:
+        await terminal_socket(websocket, manager)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -261,6 +266,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             return workspaces.get(proposal_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/proposals/{proposal_id}/preview")
+    def preview_proposal_file(proposal_id: str, path: str) -> dict:
+        try:
+            return workspaces.preview_file(proposal_id, path)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError, UnicodeError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     class ApplyRequest(BaseModel):
         confirmation: str

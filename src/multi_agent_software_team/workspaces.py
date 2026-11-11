@@ -99,6 +99,38 @@ class WorkspaceService:
             raise KeyError('Proposal not found')
         return dict(row)
 
+    def preview_file(self, proposal_id: str, path: str) -> dict:
+        """Read a proposed file for diff review without modifying the project."""
+        proposal = self.get(proposal_id)
+        relative = safe_path(path)
+        change = next((c for c in proposal['changes'] if c['path'] == path), None)
+        if change is None:
+            raise WorkspaceError('File is not part of this proposal')
+        project = self.manager.get(proposal['project_id'])
+        if project is None:
+            raise WorkspaceError('Project not found')
+        original = project.path / relative
+        # No symlinks: neither the project tree nor the isolated proposal tree.
+        if original.is_symlink() or any((project.path / Path(*relative.parts[:i])).is_symlink() for i in range(1, len(relative.parts))):
+            raise WorkspaceError('Unsafe original path')
+        if change['action'] == 'create':
+            before = ''
+        else:
+            if not original.is_file():
+                raise WorkspaceError('Original file no longer exists')
+            raw = original.read_bytes()
+            if len(raw) > MAX_FILE or digest(raw) != change['before_sha256']:
+                raise WorkspaceError('Original file changed since the proposal was created')
+            before = raw.decode('utf-8')
+        if change['action'] == 'delete':
+            after = ''
+        else:
+            target = self.root / proposal_id / relative
+            if target.is_symlink() or not target.is_file() or target.stat().st_size > MAX_FILE:
+                raise WorkspaceError('Proposed file unavailable')
+            after = target.read_text(encoding='utf-8')
+        return {'path': path, 'before': before, 'after': after}
+
     def get(self, proposal_id: str) -> dict:
         row = self._get(proposal_id)
         row['changes'] = json.loads(row['changes'])

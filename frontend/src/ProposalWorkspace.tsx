@@ -45,19 +45,19 @@ export default function ProposalWorkspace({ projectId, contextPaths, contextDige
     finally { setBusy(false); }
   }
   return <section className="proposal-workspace">
-    <div className="section-heading"><div><h2>Workspace proposals · v2.2</h2><p>Generate Python project files in an isolated snapshot. Review diffs; originals remain unchanged.</p></div></div>
+    <div className="section-heading"><div><h2>AI Assistant</h2><p>Describe what you want to build or change.</p></div></div>
     <div className="info-panel" style={{marginBottom: 20}}>
-      <h3>{projectKind === 'managed' ? 'New Python project' : 'Existing Python repository'}</h3>
-      <p style={{marginBottom: 12}}>Approved reference files: {contextPaths.length ? contextPaths.join(', ') : 'none — only new files can be generated'}</p>
+      <h3>{projectKind === 'managed' ? 'What would you like to build?' : 'What would you like to change?'}</h3>
+      <p style={{marginBottom: 12}}>{contextPaths.length} reference file(s) approved for AI context</p>
       <form onSubmit={e => void submit(e)}>
         <textarea aria-label="Proposal task" rows={4} style={{width: '100%', padding: 12, borderRadius: 8, marginBottom: 12}} placeholder={projectKind === 'managed' ? 'Create a FastAPI application with GET /health, pyproject.toml, README.md and pytest tests.' : 'Add a helper function and tests. Select and approve existing files in Repository Insights first if they must be modified.'} value={task} onChange={e => setTask(e.target.value)}/>
-        <button className="primary" type="submit" disabled={busy || !task.trim()}>{busy ? 'Preparing…' : 'Generate proposal'}</button>
+        <button className="primary" type="submit" disabled={busy || !task.trim()}>{busy ? 'Preparing…' : 'Send to AI'}</button>
       </form>
     </div>
     {error && <div role="alert" className="alert">{error}</div>}
-    {proposals.length > 0 && <div style={{display:'flex', gap:8, flexWrap:'wrap', marginBottom:16}}>{proposals.map(p => <button key={p.id} className={current?.id === p.id ? 'primary' : 'secondary'} onClick={() => { setSelected(p.id); setExpanded(null); }}>{p.task.slice(0,45)} · {p.status}</button>)}</div>}
+    {proposals.length > 0 && <div className="ai-task-picker"><label htmlFor="ai-task-history">Conversation history</label><select id="ai-task-history" value={current?.id ?? ''} onChange={e=>{setSelected(e.target.value);setExpanded(null);}}>{proposals.map(p=><option key={p.id} value={p.id}>{p.task.slice(0,65)} · {p.status}</option>)}</select></div>}
     {current && <div className="info-panel">
-      <h3>Proposal · {current.status}</h3>
+      <h3>Task · {current.status}</h3>
       <p>{current.task}</p>
       {current.status === 'running' || current.status === 'queued' ? <p>Gemini is preparing file operations. This can take a minute…</p> : null}
       {current.error && <div role="alert" className="alert">{current.error}</div>}
@@ -76,7 +76,7 @@ export default function ProposalWorkspace({ projectId, contextPaths, contextDige
           <button className="primary" disabled={busy || !confirmation.trim() || (projectKind === 'existing' && !authorizeExisting)} onClick={() => void execute('apply')}>Apply verified changes</button>
         </div>}
       </div>}
-      {current.status === 'applied' && <p style={{marginTop:16}}>Changes applied. Refresh the Files tab to inspect the project.</p>}
+      {current.status === 'applied' && <p style={{marginTop:16}}>Changes applied to your project. Refresh Explorer to see new files.</p>}
     </div>}
   </section>;
 }

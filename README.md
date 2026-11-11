@@ -585,3 +585,26 @@ locally through Vite, so the editor does not need a CDN at runtime.
 The integrated terminal, Git operations, and unified agent workflow are **not yet
 implemented**; those are planned for v3.2–v3.4. The bottom Output panel explicitly
 indicates this. This is a v3.1 preview, not the complete v3 IDE.
+
+## v3.2 preview — Terminal & IDE usability
+
+- Open a project, use the **Terminal** button above the editor, and click **Start terminal**. The shell starts in the selected project's directory. Enter commands in the input field; the output streams into the bottom panel.
+- Drag the separators between Explorer, editor and AI panel, or the terminal's top border, to resize. Use the header buttons to hide Explorer or AI.
+- The AI panel defaults to **Assistant**; **Context** and **History** are under the sliders button. Existing proposal generation, Docker tests, and explicit apply confirmation remain unchanged.
+- Terminal sessions start only after clicking **Start terminal**, and end when the panel is closed or the project changes. The terminal is intended for trusted local users and runs with the backend's OS privileges; it is **not sandboxed**. Never expose FastAPI/Vite to a network or untrusted users. Terminal access is available for registered projects too and bypasses the editor's read-only policy (because it is an interactive user shell).
+- This preview uses a lightweight command input and streamed PTY output, **not yet a full xterm.js terminal emulator**. Interactive full-screen terminal programs and ANSI formatting are not supported. Git UI is deferred.
+- Start FastAPI on `127.0.0.1:8000` and Vite on `127.0.0.1:5173` as before. The Vite proxy now forwards WebSocket connections.
+
+## v3.3 — Conversational AI & terminal
+
+The IDE's AI panel now presents requests and results as a conversation. Generated proposals are still **isolated**; new proposals automatically trigger Docker pytest once generation finishes. Open any changed file to review its before/after diff in Monaco. Only **Accept changes** with explicit project-name confirmation writes the tested proposal to the real project. Registered existing projects also require explicit write authorization. The previous Repository Context view remains available from the **Context** action; approve reference files there before asking AI to modify them.
+
+The terminal now uses `@xterm/xterm` and `@xterm/addon-fit` for proper ANSI/interactive PTY rendering. After updating source, run `cd frontend && npm install && npm run build` to install the two new dependencies and refresh `package-lock.json`. The shell is human-controlled, runs locally with the backend user's permissions, and is not an agent execution sandbox. Git integration is intentionally deferred.
+
+Before using AI tests, build the Docker test image if not already present:
+
+```bash
+docker build -f docker/project-test-runner.Dockerfile -t multi-agent-studio-project-tests:2.2 .
+```
+
+**Known limitations:** This is still a local-only development IDE; the AI interaction uses the existing proposal backend rather than a free-form question-answering chat, and the tester does not yet automatically send failures back to Developer for another generation attempt. The `npm run build` and full Python test suite need validation in the user's environment when dependency installation is available.
