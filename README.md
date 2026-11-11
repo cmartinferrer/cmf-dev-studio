@@ -6,11 +6,11 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 
 ## Current Features
 
-- **Mission management:** Shared mission state using Python dataclasses.
+- **Mission management:** Shared mission state using Python dataclasses, including per-attempt execution history.
 - **Analyst Agent:** Generates software requirements dynamically using Google Gemini.
 - **Developer Agent:** Generates Python implementations and revises failed implementations using pytest feedback.
 - **Tester Agent:** Generates pytest tests based on the requirements and generated implementation.
-- **Orchestrator:** Coordinates agents, supports optional test execution, and retries implementations after test failures with a configurable attempt limit.
+- **Orchestrator:** Coordinates agents, supports optional test execution, retries failed implementations, and records each runner outcome.
 - **LLM abstraction:** Uses an `LLMClient` protocol to decouple agents from specific providers.
 - **Gemini integration:** Uses the official Google GenAI SDK.
 - **Test runner abstraction:** Uses a `TestRunner` protocol to decouple orchestration from the execution environment.
@@ -170,6 +170,14 @@ orchestrator = Orchestrator(llm=llm, runner=trusted_runner, max_attempts=3)
 ```
 
 **Security:** This example requires a runner appropriate for the trust level of the input. The CLI still does not configure a runner; the Docker implementation has not been approved for untrusted LLM-generated code. Unit tests exercise retry behavior with mocked runners only.
+
+## Execution History
+
+Each `Mission` maintains a `history` list of immutable `ExecutionAttempt` snapshots. Every completed runner invocation records the attempt number, exact code submitted, `TestStatus`, exit code, standard output, and standard error. Previous entries are preserved when the developer produces a correction.
+
+`mission.attempts` still counts runner invocations; `mission.feedback` holds the latest feedback. If a runner raises an exception before returning a `TestResult`, the invocation is counted but no synthetic history entry is added. When a mission is run again, its history is reset alongside its attempt counter.
+
+History is held in memory; it is not persisted to disk and is not generated when no runner is configured. Unit tests use mocked runners, and the CLI still does not execute LLM-generated code.
 
 ## Docker Test Runner
 

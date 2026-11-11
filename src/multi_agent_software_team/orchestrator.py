@@ -4,7 +4,7 @@ from multi_agent_software_team.agents.analyst import AnalystAgent
 from multi_agent_software_team.agents.developer import DeveloperAgent
 from multi_agent_software_team.agents.tester import TesterAgent
 from multi_agent_software_team.llm.client import LLMClient
-from multi_agent_software_team.models import Mission, MissionStatus
+from multi_agent_software_team.models import ExecutionAttempt, Mission, MissionStatus
 from multi_agent_software_team.runner.client import TestRunner
 from multi_agent_software_team.runner.models import TestResult, TestStatus
 
@@ -54,6 +54,7 @@ class Orchestrator:
         mission.status = MissionStatus.IN_PROGRESS
         mission.feedback = ""
         mission.attempts = 0
+        mission.history.clear()
 
         try:
             self.analyst.execute(mission)
@@ -63,9 +64,20 @@ class Orchestrator:
             if self.runner is not None:
                 for attempt in range(self.max_attempts):
                     mission.attempts += 1
+                    submitted_code = mission.code
                     result = self.runner.run(
-                        code=mission.code,
+                        code=submitted_code,
                         tests=mission.tests,
+                    )
+                    mission.history.append(
+                        ExecutionAttempt(
+                            number=mission.attempts,
+                            code=submitted_code,
+                            status=result.status,
+                            exit_code=result.exit_code,
+                            stdout=result.stdout,
+                            stderr=result.stderr,
+                        )
                     )
                     self._apply_test_result(mission, result)
 
