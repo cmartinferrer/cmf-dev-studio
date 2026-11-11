@@ -10,92 +10,77 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 - **Analyst Agent:** Generates software requirements dynamically using Google Gemini.
 - **Developer Agent:** Generates Python implementations based on the analyst's requirements.
 - **Tester Agent:** Generates pytest tests based on the requirements and generated implementation.
-- **Orchestrator:** Coordinates agents sequentially, manages mission status, and handles execution failures.
+- **Orchestrator:** Coordinates agents sequentially, manages mission status, handles failures, and supports an optional injected test runner.
 - **LLM abstraction:** Uses an `LLMClient` protocol to decouple agents from specific providers.
 - **Gemini integration:** Uses the official Google GenAI SDK.
-- **Docker Test Runner:** Executes Python code and pytest tests inside a restricted Docker container.
+- **Test runner abstraction:** Uses a `TestRunner` protocol to decouple orchestration from the execution environment.
+- **Docker Test Runner:** Independently executes Python code and pytest tests inside a restricted Docker container.
 - **Execution results:** Distinguishes successful tests, test failures, and Docker infrastructure errors.
 - **CLI entry point:** Runs an example mission and displays its results.
-- **Automated testing:** Includes unit tests with mocks and integration tests using real Docker containers.
+- **Automated testing:** Includes mocked unit tests and integration tests using real Docker containers with predefined, trusted code.
 
-> **Current limitation:** The Docker Test Runner is implemented and independently tested, but it is not yet integrated into the orchestrator. Generated code and tests are not automatically executed during the multi-agent workflow.
+> **Current limitation:** The orchestrator can use an injected `TestRunner`, but the CLI does not configure one. LLM-generated code is not automatically executed. Docker isolation has not been approved as a security boundary for untrusted code.
 
 ## Architecture
 
 ```text
-                       User
-                        |
-                        v
-                   Orchestrator
-                        |
-                        v
-                  Analyst Agent
-                        |
-                        v
-                 Developer Agent
-                        |
-                        v
-                  Tester Agent
-                        |
-                        v
-                  Mission Result
+                         User
+                          |
+                          v
+                     Orchestrator
+                          |
+                          v
+                    Analyst Agent
+                          |
+                          v
+                   Developer Agent
+                          |
+                          v
+                    Tester Agent
+                          |
+                          v
+                 Optional TestRunner
+                    /           \
+             Not configured   Configured
+                  |               |
+                  |          TestResult
+                  |               |
+                  +-------+-------+
+                          |
+                          v
+                    Mission Result
 
-       All agents share the same Mission state
-                        |
-                        v
-                    LLMClient
-                        |
-                        v
-                   GeminiClient
-                        |
-                        v
-                   Google Gemini
+     Analyst, Developer, Tester -> LLMClient
+                                      |
+                                      v
+                                 GeminiClient
+                                      |
+                                      v
+                                 Google Gemini
 
-
-       Independent Docker Test Runner
-                        |
-                        v
-                 Docker Container
-                        |
-                        v
-                      pytest
-                        |
-                        v
-                    TestResult
+     DockerTestRunner implements TestRunner (independently tested)
+                          |
+                          v
+                  Docker Container
+                          |
+                          v
+                        pytest
 ```
 
-The orchestrator coordinates three specialized agents:
+The orchestrator coordinates three specialized agents: `AnalystAgent` generates requirements, `DeveloperAgent` produces an implementation, and `TesterAgent` generates pytest tests. They share a single `Mission` object containing the mission description, requirements, code, tests, feedback, attempt count, and status.
 
-1. **AnalystAgent:** Analyzes the mission and generates software requirements.
-2. **DeveloperAgent:** Implements the requested functionality using those requirements.
-3. **TesterAgent:** Generates pytest tests to validate the implementation.
-
-All agents operate on the same `Mission` object, which contains:
-
-- Mission description
-- Software requirements
-- Generated source code
-- Generated tests
-- Execution feedback
-- Execution attempts
-- Current mission status
-
-Each agent accesses the information produced by previous agents.
-
-The agents use the `LLMClient` abstraction to interact with Google Gemini.
-
-The `DockerTestRunner` is currently an independent component responsible for executing Python tests inside a restricted Docker environment. Its integration into the orchestration workflow is planned for a future iteration.
+The agents use the `LLMClient` abstraction to communicate with Gemini. An optional `TestRunner` can validate the generated code after all agents finish. **In the CLI, no runner is configured**, so the example workflow only generates code and tests.
 
 ## Requirements
 
 - Python (version specified in `.python-version`)
 - [uv](https://docs.astral.sh/uv/)
-- Google Gemini API key
-- Docker with a running daemon (required for Docker integration tests and isolated test execution)
+- Google Gemini API key for the CLI example
+- Docker with a running daemon for Docker integration tests or standalone Docker runner execution
 
 ## Getting Started
 
-Clone the repository and install the project dependencies:
+Install project dependencies:
 
 ```bash
 uv sync
@@ -109,7 +94,7 @@ GOOGLE_API_KEY=your_google_api_key
 
 The application loads environment variables using `python-dotenv`.
 
-> **Security:** Never commit `.env` or API credentials to version control. Ensure `.env` is included in `.gitignore`.
+> **Security:** Never commit `.env` or API credentials. Ensure `.env` is included in `.gitignore`.
 
 Run the example mission:
 
@@ -117,21 +102,11 @@ Run the example mission:
 uv run python main.py
 ```
 
-The orchestrator executes the following workflow:
-
-1. **AnalystAgent:** Generates software requirements using Gemini.
-2. **DeveloperAgent:** Generates Python code using the analyst's requirements.
-3. **TesterAgent:** Generates pytest tests based on the requirements and implementation.
-
-The resulting mission contains the requirements, generated code, generated tests, and mission status.
-
-Generated code is displayed but is not automatically executed by the orchestrator.
+The orchestrator runs `AnalystAgent`, `DeveloperAgent`, and `TesterAgent` sequentially. The resulting mission contains requirements, generated code, tests, and execution status. The CLI displays the generated artifacts but does not run them.
 
 ## LLM Integration
 
-The project uses a provider-independent abstraction for language model interactions.
-
-The `LLMClient` protocol defines a common interface:
+The `LLMClient` protocol defines a provider-independent interface:
 
 ```python
 from typing import Protocol
@@ -142,116 +117,78 @@ class LLMClient(Protocol):
         ...
 ```
 
-The `GeminiClient` implementation adapts the official Google GenAI SDK to this interface.
-
-Agents receive the LLM client through dependency injection, allowing the provider to be replaced without modifying agent implementations.
-
-This design provides several benefits:
-
-- Separation between agent logic and LLM providers.
-- Easier integration with alternative language models.
-- Deterministic unit testing through mocked LLM responses.
-- Reduced coupling between application components.
-
-All three agents use the same `LLMClient` abstraction.
+`GeminiClient` adapts the official Google GenAI SDK to this interface. Dependency injection keeps agent logic independent of the provider and makes deterministic unit testing with mocks possible.
 
 ## Mission Lifecycle and Error Handling
-
-The orchestrator manages four mission states:
 
 | Status | Description |
 |---|---|
 | `PENDING` | The mission has not started. |
 | `IN_PROGRESS` | The workflow is running. |
-| `COMPLETED` | All agents have executed successfully. |
-| `FAILED` | An agent raised an exception. |
+| `COMPLETED` | All agents finished successfully and, if a runner was configured, its tests passed. |
+| `FAILED` | An agent or runner raised an exception, or the configured runner reported a failed execution. |
 
-If an agent fails, the orchestrator:
+If an agent or runner raises an exception, the orchestrator stops the workflow, sets the status to `FAILED`, stores the exception message in `mission.feedback`, and returns the updated mission. Previously generated information remains available.
 
-1. Stops the workflow.
-2. Marks the mission as `FAILED`.
-3. Stores the error message in `mission.feedback`.
-4. Returns the updated mission.
+> **Important:** Without a configured runner, `COMPLETED` means that all agents finished successfully; it does **not** mean that the generated implementation passed tests.
 
-Previously generated information remains available for inspection.
+### Optional Test Runner Integration
 
-> **Important:** A `COMPLETED` mission currently means that all agents executed successfully. It does not mean that the generated implementation has passed its tests.
+The orchestrator accepts a `TestRunner` through dependency injection:
+
+```python
+orchestrator = Orchestrator(llm=llm, runner=runner)
+```
+
+When a runner is supplied, the orchestrator:
+
+1. Executes the analyst, developer, and tester agents.
+2. Increments `mission.attempts` when invoking the runner.
+3. Calls `runner.run(code=mission.code, tests=mission.tests)`.
+4. Stores the execution output or error details in `mission.feedback`.
+5. Marks the mission `COMPLETED` only when the runner reports a successful `PASSED` result; otherwise, marks it `FAILED`.
+
+When no runner is supplied (`Orchestrator(llm=llm)`), the previous workflow is preserved. There are no automatic retries or developer feedback loops yet.
+
+**Safety:** The optional runner integration is verified using mocked responses. Do not inject `DockerTestRunner` into a workflow that passes it untrusted LLM-generated code until an appropriate security review and containment solution are in place.
 
 ## Docker Test Runner
 
-The project includes a Docker-based test runner for executing Python implementations and pytest tests in a restricted environment.
-
-The runner:
-
-1. Creates a temporary workspace.
-2. Writes the Python implementation to `solution.py`.
-3. Writes the generated tests to `test_solution.py`.
-4. Starts a dedicated Docker container.
-5. Executes pytest inside the container.
-6. Captures the execution result.
-7. Attempts container cleanup and verifies its absence.
-8. Removes the temporary workspace.
+The standalone `DockerTestRunner` creates a temporary workspace, writes the implementation to `solution.py` and tests to `test_solution.py`, launches a restricted container, executes pytest, captures results, attempts to remove the container, verifies its absence, and removes the workspace.
 
 ### Execution Results
 
-`DockerTestRunner.run(code, tests)` returns a `TestResult` containing:
-
-- `success`: Whether execution completed successfully.
-- `status`: Classification of the execution outcome.
-- `exit_code`: Process exit code.
-- `stdout`: Standard output captured from execution.
-- `stderr`: Standard error captured from execution.
-
-The supported execution statuses are:
+`DockerTestRunner.run(code, tests)` returns a `TestResult` with `success`, `status`, `exit_code`, `stdout`, and `stderr`.
 
 | Status | Description |
 |---|---|
-| `TestStatus.PASSED` | pytest completed successfully. |
-| `TestStatus.TEST_FAILED` | pytest returned a non-zero exit code not recognized as a Docker infrastructure failure. |
-| `TestStatus.INFRASTRUCTURE_ERROR` | Docker invocation failure, recognized daemon error, timeout, or unconfirmed container cleanup. |
+| `TestStatus.PASSED` | pytest exited successfully. |
+| `TestStatus.TEST_FAILED` | pytest exited unsuccessfully without a recognized Docker infrastructure error. |
+| `TestStatus.INFRASTRUCTURE_ERROR` | Recognized Docker invocation/daemon error, timeout, or unconfirmed container cleanup. |
 
-Docker errors are classified using known exit codes and error messages. Some failures may remain ambiguous.
+Infrastructure errors are classified using known exit codes and messages; some errors can be ambiguous.
 
 ### Docker Isolation
 
-The runner applies several restrictions to reduce the risks associated with executing Python code:
+The runner applies the following restrictions:
 
-- Non-root user (`10001:10001`).
-- Network access disabled (`--network=none`).
-- Read-only container filesystem.
-- Linux capabilities dropped.
-- Privilege escalation disabled.
-- IPC isolation.
-- CPU, memory, process, and file descriptor limits.
-- Read-only workspace mount.
-- Restricted temporary filesystem.
-- Python bytecode generation disabled.
-- Automatic pytest plugin loading disabled.
+- Non-root user (`10001:10001`)
+- Disabled network access (`--network=none`) and IPC isolation (`--ipc=none`)
+- Read-only root filesystem and read-only workspace mount
+- Dropped Linux capabilities and disabled privilege escalation
+- CPU, memory, process, and file descriptor limits
+- Restricted temporary filesystem
+- Disabled Python bytecode writes and automatic pytest plugin loading
 
-The dedicated Docker image is defined in:
-
-```text
-docker/test-runner.Dockerfile
-```
-
-Build the image using:
+Build the dedicated runner image:
 
 ```bash
-docker build \
-  -f docker/test-runner.Dockerfile \
-  -t multi-agent-test-runner:latest \
-  .
+docker build -f docker/test-runner.Dockerfile -t multi-agent-test-runner:latest .
 ```
 
 ### Temporary Workspaces
 
-Execution workspaces are created inside:
-
-```text
-.runner-workspaces/
-```
-
-Each execution uses a separate temporary directory containing only the Python implementation and its tests:
+Each execution creates a temporary directory under `.runner-workspaces/` containing only `solution.py` and `test_solution.py`:
 
 ```text
 .runner-workspaces/
@@ -260,130 +197,68 @@ Each execution uses a separate temporary directory containing only the Python im
     └── test_solution.py
 ```
 
-The workspace is mounted into the container in read-only mode.
+Only this temporary directory is bind-mounted into the container, not the entire project. This avoids exposing `.env`, `.git`, and other project files through the workspace mount. The temporary directory is removed after normal execution.
 
-The project directory itself is not mounted, preventing direct exposure of files such as `.env`, `.git`, and other project resources through this mount.
-
-The `.runner-workspaces/` directory must be excluded from version control:
+Ensure `.gitignore` includes:
 
 ```gitignore
+.env
 .runner-workspaces/
 ```
 
-Temporary workspaces are automatically removed when execution finishes normally.
-
 ### Security Limitations
 
-**The Docker Test Runner is not currently approved for executing untrusted LLM-generated code.**
-
-Although Docker restrictions reduce exposure, they do not establish a complete security boundary.
-
-Areas requiring further review include:
-
-- Docker daemon security and container escape risks.
-- Host filesystem isolation.
-- Container lifecycle management.
-- Timeout handling and process termination.
-- Cleanup failures.
-- Resource exhaustion and denial-of-service risks.
-
-The current integration tests use predefined, trusted Python code.
-
-The runner will not be connected to automatic execution of LLM-generated implementations until the security requirements have been reviewed.
+**The Docker runner is not approved for running untrusted LLM-generated code.** Docker restrictions reduce exposure but do not prove isolation against hostile code. Docker daemon security, container escapes, host filesystem access, timeouts, cleanup failures, and resource exhaustion require further review. Real integration tests use only predefined, trusted Python code.
 
 ## Development and Testing
 
-The project follows an incremental, test-driven development approach.
-
-Tests cover:
-
-- Mission state and lifecycle.
-- Individual agent behavior.
-- LLM integration.
-- Multi-agent orchestration.
-- Error handling.
-- Docker command construction and execution result classification.
-- Docker container lifecycle management.
-- Real Docker integration.
-
-External LLM interactions are mocked during automated testing to avoid API costs and ensure reproducible results.
+The project uses pytest. Agent and orchestrator tests mock external dependencies to avoid Gemini API calls and keep results reproducible.
 
 ### Unit Tests
 
-Unit tests use mocks and do not require a running Docker daemon.
-
-Run them with:
+Run unit tests without Docker:
 
 ```bash
 uv run pytest -v -m "not integration"
 ```
 
+The optional runner integration is covered by mocked unit tests for success, test failure, infrastructure failure, exceptions, and compatibility with the no-runner workflow.
+
 ### Docker Integration Tests
 
-Integration tests execute predefined Python code inside real Docker containers.
-
-They verify:
-
-- Successful execution of valid Python code.
-- Correct reporting of failing pytest assertions.
-- Retrieval of execution results.
-- Container cleanup verification.
-
-Before running integration tests, ensure Docker is running and build the runner image:
+Start Docker and build the runner image:
 
 ```bash
-docker build \
-  -f docker/test-runner.Dockerfile \
-  -t multi-agent-test-runner:latest \
-  .
+docker build -f docker/test-runner.Dockerfile -t multi-agent-test-runner:latest .
 ```
 
-Run the integration tests:
+Then run:
 
 ```bash
 uv run pytest -v -m integration
 ```
 
-### Complete Test Suite
+The integration tests verify execution of trusted Python code, classification of passing and failing tests, captured output, and container cleanup.
 
-Run all tests with:
+### Complete Test Suite
 
 ```bash
 uv run pytest -v
 ```
 
-**Latest verified results:**
-
-- Unit tests: 69 passed.
-- Integration tests: 2 passed.
-- Total: 71 passed.
-
-These results reflect the latest local test executions and may change as the project evolves.
+The last confirmed baseline before optional orchestrator-runner integration was **69 unit tests and 2 Docker integration tests passing**. The new orchestrator tests must be run locally before recording an updated total.
 
 ## Project Status
 
 **Early development — educational prototype.**
 
-The current implementation demonstrates:
-
-- Shared state between specialized agents.
-- Sequential multi-agent orchestration.
-- Real LLM integration through Google Gemini.
-- Dependency injection and provider abstraction.
-- Mission lifecycle management.
-- Error handling.
-- Docker-based Python test execution.
-- Execution result classification.
-- Unit and integration testing.
-
-The multi-agent workflow and Docker Test Runner are implemented but are not yet connected.
+Implemented: shared mission state, sequential multi-agent orchestration, Gemini integration, provider abstraction, mission lifecycle and error handling, standalone Docker test execution, result classification, optional runner dependency injection, and unit/integration testing.
 
 ### Planned Improvements
 
-- Review and strengthen the security of isolated code execution.
-- Integrate the Docker Test Runner into the orchestrator.
-- Introduce feedback loops between `TesterAgent` and `DeveloperAgent`.
-- Implement configurable retry policies.
+- Review and strengthen the security of isolated execution before using LLM-generated code.
+- Add feedback loops between `DeveloperAgent` and test execution.
+- Introduce configurable retry policies.
 - Improve logging and execution observability.
 - Explore more advanced orchestration strategies.
 
