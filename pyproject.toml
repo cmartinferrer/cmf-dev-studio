@@ -7,7 +7,10 @@ authors = [
     { name = "Cristian Martín", email = "cmf18.software@gmail.com" }
 ]
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "google-genai>=2.33.0",
+    "python-dotenv>=1.2.4",
+]
 
 [project.scripts]
 multi-agent-software-team = "multi_agent_software_team:main"
