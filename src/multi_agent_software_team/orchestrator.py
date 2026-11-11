@@ -7,8 +7,13 @@ from multi_agent_software_team.llm.client import LLMClient
 
 class Orchestrator:
     def __init__(self, llm: LLMClient) -> None:
+        """Initialize the agents with their required dependencies.
+
+        Args:
+            llm: Language model client shared by LLM-powered agents.
+        """
         self.analyst = AnalystAgent(llm=llm)
-        self.developer = DeveloperAgent()
+        self.developer = DeveloperAgent(llm=llm)
         self.tester = TesterAgent()
 
     def run(self, mission: Mission) -> Mission:

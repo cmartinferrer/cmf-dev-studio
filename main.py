@@ -9,7 +9,11 @@ def main() -> None:
     load_dotenv()
     
     mission = Mission(
-        description="Create a Python function that checks if a number is prime."
+        description=(
+            "Create a Python function called calculate_factorial "
+            "that accepts a non-negative integer and returns its factorial. "
+            "Raise ValueError for negative numbers."
+        )
     )
 
     orchestrator = Orchestrator(llm=GeminiClient())
