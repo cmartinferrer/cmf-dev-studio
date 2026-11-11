@@ -211,6 +211,28 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    class ApplyRequest(BaseModel):
+        confirmation: str
+        allow_existing: bool = False
+
+    @app.post("/api/proposals/{proposal_id}/test")
+    def test_proposal(proposal_id: str) -> dict:
+        try:
+            return workspaces.test(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/proposals/{proposal_id}/apply")
+    def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
+        try:
+            return workspaces.apply(proposal_id, request.confirmation, request.allow_existing)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return app
 
 

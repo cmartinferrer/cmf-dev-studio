@@ -83,6 +83,9 @@ class WorkspaceService:
                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL,
                 task TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
                 changes TEXT NOT NULL DEFAULT '[]')''')
+            cols = {r[1] for r in db.execute('PRAGMA table_info(workspace_proposals)')}
+            if 'test_output' not in cols:
+                db.execute("ALTER TABLE workspace_proposals ADD COLUMN test_output TEXT NOT NULL DEFAULT ''")
 
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
@@ -201,3 +204,123 @@ class WorkspaceService:
         except Exception as exc:
             # No prompt or generated code in errors.
             self._update(proposal_id, 'failed', error=f'{type(exc).__name__}: {str(exc)[:400]}')
+
+# v2.2: verified application and isolated project-level test execution.
+import subprocess
+import threading
+
+_APPLY_LOCK = threading.RLock()
+TEST_IMAGE = 'multi-agent-studio-project-tests:2.2'
+
+
+def _checked_target(root: Path, path: str) -> Path:
+    relative = safe_path(path)
+    target = root / relative
+    if root.is_symlink() or not root.is_dir():
+        raise WorkspaceError('Project directory is no longer safe')
+    for parent in [root, *(root / Path(*relative.parts[:i]) for i in range(1, len(relative.parts)))]:
+        if parent.is_symlink():
+            raise WorkspaceError(f'Symlink in destination path: {path}')
+    if target.is_symlink() or (target.exists() and not target.is_file()):
+        raise WorkspaceError(f'Unsafe destination: {path}')
+    return target
+
+
+def _test_proposal(self: WorkspaceService, proposal_id: str) -> dict:
+    row = self.get(proposal_id)
+    if row['status'] not in ('ready', 'tested', 'test_failed'):
+        raise WorkspaceError('Proposal must be ready before testing')
+    workspace = self.root / proposal_id
+    if not workspace.is_dir():
+        raise WorkspaceError('Proposal workspace missing')
+    # Docker runs with no network, read-only project files, capped CPU/memory and no privileges.
+    command = [
+        'docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+        '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '512m',
+        '--cpus', '1', '--user', '10001:10001', '--tmpfs', '/tmp:rw,nosuid,noexec,size=64m',
+        '--mount', f'type=bind,src={workspace.resolve()},dst=/workspace,readonly',
+        '-w', '/workspace', TEST_IMAGE,
+        'python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        output = (result.stdout + '\n' + result.stderr)[-16000:]
+        passed = result.returncode == 0 and (' passed' in output or ' passed,' in output)
+        status = 'tested' if passed else 'test_failed'
+    except FileNotFoundError:
+        output, passed, status = 'Docker is not installed or not on PATH', False, 'test_failed'
+    except subprocess.TimeoutExpired:
+        output, passed, status = 'Docker tests timed out after 120 seconds', False, 'test_failed'
+    with self._db() as db:
+        db.execute('UPDATE workspace_proposals SET status=?, test_output=? WHERE id=?', (status, output, proposal_id))
+    return self.get(proposal_id)
+
+
+def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str, allow_existing: bool = False) -> dict:
+    with _APPLY_LOCK:
+        row = self.get(proposal_id)
+        if row['status'] != 'tested':
+            raise WorkspaceError('Only proposals with passing project tests may be applied')
+        project = self.manager.get(row['project_id'])
+        if project is None:
+            raise WorkspaceError('Project no longer exists')
+        if confirmation != project.name:
+            raise WorkspaceError('Type the exact project name to confirm application')
+        if project.kind.value == 'existing' and not allow_existing:
+            raise WorkspaceError('Existing projects require explicit write authorization')
+        root = project.path
+        workspace = self.root / proposal_id
+        changes = row['changes']
+        if not changes:
+            raise WorkspaceError('No changes to apply')
+        prepared = []
+        # Validate the complete transaction before touching any project file.
+        for change in changes:
+            path = change['path']
+            target = _checked_target(root, path)
+            old = target.read_bytes() if target.exists() else None
+            if digest(old) != change['before_sha256']:
+                raise WorkspaceError(f'Conflict: {path} changed since the proposal was generated')
+            new = None if change['action'] == 'delete' else (workspace / safe_path(path)).read_bytes()
+            if new is not None and (len(new) > MAX_FILE or b'\x00' in new):
+                raise WorkspaceError(f'Unsafe proposed content: {path}')
+            prepared.append((target, old, new))
+        backup = self.root / (proposal_id + '-backup')
+        backup.mkdir(exist_ok=False)
+        touched = []
+        try:
+            for index, (target, old, new) in enumerate(prepared):
+                # Recheck immediately before writing; other writers should not edit during apply.
+                if digest(target.read_bytes() if target.exists() else None) != digest(old):
+                    raise WorkspaceError(f'Conflict during apply: {target.name}')
+                _checked_target(root, str(target.relative_to(root).as_posix()))
+                if old is not None:
+                    (backup / str(index)).write_bytes(old)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                touched.append((target, old))
+                if new is None:
+                    target.unlink()
+                else:
+                    temporary = target.with_name(target.name + '.studio-tmp-' + proposal_id)
+                    try:
+                        temporary.write_bytes(new)
+                        os.replace(temporary, target)
+                    finally:
+                        temporary.unlink(missing_ok=True)
+            with self._db() as db:
+                db.execute("UPDATE workspace_proposals SET status='applied' WHERE id=? AND status='tested'", (proposal_id,))
+        except Exception:
+            for target, old in reversed(touched):
+                if old is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(old)
+            raise
+        finally:
+            shutil.rmtree(backup, ignore_errors=True)
+        return self.get(proposal_id)
+
+
+WorkspaceService.test = _test_proposal
+WorkspaceService.apply = _apply_proposal

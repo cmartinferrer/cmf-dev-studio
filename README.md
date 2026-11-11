@@ -535,3 +535,35 @@ This release adds the **Workspace proposals** tab for both managed (new) and reg
 **Limitations:** This is a proposal generator, not yet the full Analyst → Developer → Tester repository workflow. It does not run tests on generated projects, apply changes, or create a final export. The model can fail to return valid JSON or propose unsupported operations; those failures are reported in the proposal. Snapshots exclude hidden files, symlinks, common secret paths, binary files, and oversized files, but automatic secret exclusion is not a substitute for checking what you approve. Gemini may still be temporarily unavailable. Provider retry events are not yet surfaced individually in the UI.
 
 Backend tests: `uv run pytest -q -m "not integration"`. Frontend: `cd frontend && npm ci && npm run build`. Start the backend with `uv run uvicorn multi_agent_software_team.api.app:app --reload --reload-dir src --host 127.0.0.1 --port 8000` and frontend with `npm run dev`.
+
+## v2.2 — Test and apply workspace proposals (local preview)
+
+Workspace proposals can now be tested against their isolated snapshot and, after
+explicit confirmation, applied to the selected project. Build the restricted test
+image once from the repository root:
+
+```bash
+docker build -f docker/project-test-runner.Dockerfile -t multi-agent-studio-project-tests:2.2 .
+```
+
+In **Workspace proposals**, generate a proposal, review its diffs, choose **Run
+Docker pytest**, then type the exact project name to enable **Apply verified
+changes**. Registered existing repositories require an additional explicit
+write-authorization checkbox. Applying verifies the original file SHA-256 values
+and refuses conflicts; it does not automatically commit changes to Git. Keep a
+Git commit or backup before approving edits to an existing project.
+
+**Important limitations:** This is a manually reviewed generate → test → apply
+workflow, not autonomous repair. Failing tests are displayed but do not yet
+trigger a Developer/Tester correction loop. The test container deliberately has
+no network and includes only Python 3.12, pytest, FastAPI, Pydantic and httpx;
+projects needing other dependencies will need a dedicated, explicitly approved
+runner image. No dependency installation from untrusted projects is performed.
+The Docker test process has a 120-second limit and resource restrictions. The
+project must contain pytest-discoverable tests for a meaningful passing result.
+Only safe, supported text files from the bounded snapshot are managed.
+
+If a project changes after a proposal is generated, application stops with a
+conflict rather than overwriting that file. The service attempts rollback on
+write failure, but filesystem operations are not a fully atomic transaction;
+use version control before applying changes.

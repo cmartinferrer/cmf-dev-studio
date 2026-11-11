@@ -40,7 +40,10 @@ export const getRepositoryInsights = (projectId: string) => request<RepositoryIn
 export const previewRepositoryContext = (projectId: string, paths: string[]) => request<ContextPreview>(`/projects/${encodeURIComponent(projectId)}/context/preview`, { method: 'POST', body: JSON.stringify({ paths }) });
 
 export type ProposalChange = { action: 'create' | 'modify' | 'delete'; path: string; diff: string; before_sha256: string | null; size: number };
-export type Proposal = { id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed'; task: string; created_at: string; error: string; changes: ProposalChange[] };
+export type Proposal = { id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; task: string; created_at: string; error: string; changes: ProposalChange[] };
 export const createProposal = (projectId: string, task: string, contextPaths: string[], contextDigest: string | null) => request<Proposal>(`/projects/${encodeURIComponent(projectId)}/proposals`, { method: 'POST', body: JSON.stringify({ task, context_paths: contextPaths, context_digest: contextDigest }) });
 export const listProposals = (projectId: string) => request<Proposal[]>(`/projects/${encodeURIComponent(projectId)}/proposals`);
 export const getProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
+
+export const testProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST'});
+export const applyProposal = (proposalId: string, confirmation: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({confirmation, allow_existing: allowExisting})});

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createProposal, getProposal, listProposals, type Proposal } from './api';
+import { createProposal, getProposal, listProposals, testProposal, applyProposal, type Proposal } from './api';
 
 type Props = { projectId: string; contextPaths: string[]; contextDigest: string | null; projectKind: 'managed' | 'existing' };
 export default function ProposalWorkspace({ projectId, contextPaths, contextDigest, projectKind }: Props) {
@@ -9,6 +9,8 @@ export default function ProposalWorkspace({ projectId, contextPaths, contextDige
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState('');
+  const [authorizeExisting, setAuthorizeExisting] = useState(false);
   useEffect(() => { setSelected(null); setProposals([]); setError(''); void listProposals(projectId).then(setProposals).catch(e => setError(String(e))); }, [projectId]);
   useEffect(() => {
     if (!selected) return;
@@ -33,8 +35,17 @@ export default function ProposalWorkspace({ projectId, contextPaths, contextDige
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   }
+  async function execute(action: 'test' | 'apply') {
+    if (!current) return;
+    setBusy(true); setError('');
+    try {
+      const result = action === 'test' ? await testProposal(current.id) : await applyProposal(current.id, confirmation, authorizeExisting);
+      setProposals(old => [result, ...old.filter(p => p.id !== result.id)]);
+    } catch(e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  }
   return <section className="proposal-workspace">
-    <div className="section-heading"><div><h2>Workspace proposals · v2.1</h2><p>Generate Python project files in an isolated snapshot. Review diffs; originals remain unchanged.</p></div></div>
+    <div className="section-heading"><div><h2>Workspace proposals · v2.2</h2><p>Generate Python project files in an isolated snapshot. Review diffs; originals remain unchanged.</p></div></div>
     <div className="info-panel" style={{marginBottom: 20}}>
       <h3>{projectKind === 'managed' ? 'New Python project' : 'Existing Python repository'}</h3>
       <p style={{marginBottom: 12}}>Approved reference files: {contextPaths.length ? contextPaths.join(', ') : 'none — only new files can be generated'}</p>
@@ -54,7 +65,18 @@ export default function ProposalWorkspace({ projectId, contextPaths, contextDige
         <button className="secondary" onClick={() => setExpanded(expanded === change.path ? null : change.path)}>{change.action.toUpperCase()} · {change.path} · {change.size} bytes {expanded === change.path ? '▴' : '▾'}</button>
         {expanded === change.path && <pre style={{overflowX:'auto', maxHeight:480, padding:16, borderRadius:8, background:'#101827', color:'#e5e7eb', whiteSpace:'pre'}}>{change.diff || '(No text changes)'}</pre>}
       </div>)}
-      {current.status === 'ready' && <p style={{marginTop:16}}>Review only: no changes have been applied to your project. Applying proposals and project-level tests are planned for v2.2/v2.3.</p>}
+      {current.test_output && <details style={{marginTop:16}} open={current.status === 'test_failed'}><summary>Docker pytest output</summary><pre style={{whiteSpace:'pre-wrap',maxHeight:350,overflow:'auto'}}>{current.test_output}</pre></details>}
+      {['ready','tested','test_failed'].includes(current.status) && <div style={{marginTop:20, display:'grid', gap:12}}>
+        <p>Test the isolated snapshot before applying changes. Build the test image once: <code>docker build -f docker/project-test-runner.Dockerfile -t multi-agent-studio-project-tests:2.2 .</code></p>
+        <button className="primary" disabled={busy} onClick={() => void execute('test')}>{busy ? 'Working…' : 'Run Docker pytest'}</button>
+        {current.status === 'tested' && <div style={{display:'grid',gap:8}}>
+          <p>Tests passed. Applying changes writes to the project directory. Type the exact project name to confirm.</p>
+          <input aria-label="Confirm project name" placeholder="Exact project name" value={confirmation} onChange={e => setConfirmation(e.target.value)} />
+          {projectKind === 'existing' && <label><input type="checkbox" checked={authorizeExisting} onChange={e => setAuthorizeExisting(e.target.checked)}/> I explicitly authorize writing to this existing read-only registered project</label>}
+          <button className="primary" disabled={busy || !confirmation.trim() || (projectKind === 'existing' && !authorizeExisting)} onClick={() => void execute('apply')}>Apply verified changes</button>
+        </div>}
+      </div>}
+      {current.status === 'applied' && <p style={{marginTop:16}}>Changes applied. Refresh the Files tab to inspect the project.</p>}
     </div>}
   </section>;
 }
