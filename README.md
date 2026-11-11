@@ -138,6 +138,18 @@ Previously generated information remains available for inspection.
 
 > **Important:** A `COMPLETED` mission currently means that all agents executed successfully, not that the generated code passed its tests.
 
+## Docker test runner outcomes
+
+`DockerTestRunner.run(code, tests)` returns `TestResult` with `status`:
+
+- `TestStatus.PASSED`: pytest exited successfully (code 0).
+- `TestStatus.TEST_FAILED`: pytest returned a non-zero exit code not recognized as a Docker failure.
+- `TestStatus.INFRASTRUCTURE_ERROR`: Docker invocation/daemon failure, timeout, or unconfirmed container cleanup.
+
+`success`, `exit_code`, `stdout`, and `stderr` are preserved for existing consumers.
+
+**Limitations:** Docker daemon errors are detected using known exit codes and messages; some errors can still be ambiguous. `subprocess.run(timeout=30)` and best-effort cleanup do not provide a proven containment boundary. Do not execute untrusted LLM-generated code until isolation and lifecycle handling are hardened and verified.
+
 ## Development and Testing
 
 Run the complete test suite:

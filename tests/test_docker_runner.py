@@ -3,6 +3,7 @@ import subprocess
 from unittest.mock import patch
 
 from multi_agent_software_team.runner.docker import DockerTestRunner as DockerRunner
+from multi_agent_software_team.runner.models import TestStatus as RunnerStatus
 
 def test_docker_runner_builds_secure_command():
     """Verify that Docker execution uses restrictive security options.
@@ -447,3 +448,77 @@ def test_docker_runner_rejects_unconfirmed_cleanup():
     assert result.exit_code == -1
     assert result.stdout == "1 passed"
     assert "cleanup could not be confirmed" in result.stderr
+
+
+def test_runner_classifies_pytest_failure():
+    """Verify that a pytest assertion failure is not a Docker error."""
+    runner = DockerRunner()
+    with (
+        patch("multi_agent_software_team.runner.docker.subprocess.run") as mock_run,
+        patch.object(runner, "cleanup_container", return_value=True),
+    ):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stdout = "FAILED test_solution.py::test_add"
+        mock_run.return_value.stderr = ""
+        result = runner.run("def add(): return 0", "def test_add(): assert False")
+    assert result.status is RunnerStatus.TEST_FAILED
+    assert result.success is False
+
+
+def test_runner_classifies_docker_daemon_failure():
+    """Verify that an unavailable Docker daemon is an infrastructure error."""
+    runner = DockerRunner()
+    with (
+        patch("multi_agent_software_team.runner.docker.subprocess.run") as mock_run,
+        patch.object(runner, "cleanup_container", return_value=True),
+    ):
+        mock_run.return_value.returncode = 1
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = "Cannot connect to the Docker daemon"
+        result = runner.run("pass", "def test_example(): assert True")
+    assert result.status is RunnerStatus.INFRASTRUCTURE_ERROR
+    assert result.success is False
+
+
+def test_runner_classifies_docker_exit_code_125():
+    """Verify that Docker CLI failures are infrastructure errors."""
+    runner = DockerRunner()
+    with (
+        patch("multi_agent_software_team.runner.docker.subprocess.run") as mock_run,
+        patch.object(runner, "cleanup_container", return_value=True),
+    ):
+        mock_run.return_value.returncode = 125
+        mock_run.return_value.stdout = ""
+        mock_run.return_value.stderr = "docker: invalid reference format"
+        result = runner.run("pass", "def test_example(): assert True")
+    assert result.status is RunnerStatus.INFRASTRUCTURE_ERROR
+
+
+def test_runner_classifies_cleanup_failure_as_infrastructure_error():
+    """Verify that unconfirmed cleanup overrides an otherwise passing run."""
+    runner = DockerRunner()
+    with (
+        patch("multi_agent_software_team.runner.docker.subprocess.run") as mock_run,
+        patch.object(runner, "cleanup_container", return_value=False),
+    ):
+        mock_run.return_value.returncode = 0
+        mock_run.return_value.stdout = "1 passed"
+        mock_run.return_value.stderr = ""
+        result = runner.run("pass", "def test_example(): assert True")
+    assert result.status is RunnerStatus.INFRASTRUCTURE_ERROR
+    assert result.success is False
+    assert "cleanup" in result.stderr.lower()
+
+
+def test_runner_classifies_timeout_as_infrastructure_error():
+    """Verify that subprocess timeouts cannot be mistaken for pytest failures."""
+    runner = DockerRunner()
+    with (
+        patch(
+            "multi_agent_software_team.runner.docker.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["docker", "run"], 30),
+        ),
+        patch.object(runner, "cleanup_container", return_value=True),
+    ):
+        result = runner.run("pass", "def test_example(): assert True")
+    assert result.status is RunnerStatus.INFRASTRUCTURE_ERROR

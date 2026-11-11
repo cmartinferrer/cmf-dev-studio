@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from uuid import uuid4
 
-from multi_agent_software_team.runner.models import TestResult
+from multi_agent_software_team.runner.models import TestResult, TestStatus
 
 
 class DockerTestRunner:
@@ -135,11 +135,31 @@ class DockerTestRunner:
                     timeout=30,
                     check=False,
                 )
+                # Docker uses 125-127 for invocation/runtime failures. A
+                # daemon connection error may also exit with code 1, so
+                # classify that conservatively as infrastructure failure.
+                docker_error = (
+                    process.returncode in (125, 126, 127)
+                    or (
+                        process.returncode != 0
+                        and any(marker in (process.stderr or "").lower() for marker in (
+                            "cannot connect to the docker daemon",
+                            "failed to connect to the docker api",
+                            "is the docker daemon running",
+                        ))
+                    )
+                )
+                status = (
+                    TestStatus.INFRASTRUCTURE_ERROR if docker_error
+                    else TestStatus.PASSED if process.returncode == 0
+                    else TestStatus.TEST_FAILED
+                )
                 result = TestResult(
-                    success=process.returncode == 0,
+                    success=status is TestStatus.PASSED,
                     exit_code=process.returncode,
                     stdout=process.stdout,
                     stderr=process.stderr,
+                    status=status,
                 )
             except FileNotFoundError as exc:
                 result = TestResult(
@@ -147,6 +167,7 @@ class DockerTestRunner:
                     exit_code=-1,
                     stdout="",
                     stderr=f"Docker execution failed: {exc}",
+                    status=TestStatus.INFRASTRUCTURE_ERROR,
                 )
             except subprocess.TimeoutExpired as exc:
                 result = TestResult(
@@ -154,6 +175,7 @@ class DockerTestRunner:
                     exit_code=-1,
                     stdout="",
                     stderr=f"Docker execution timed out after {exc.timeout} seconds",
+                    status=TestStatus.INFRASTRUCTURE_ERROR,
                 )
             finally:
                 cleanup_confirmed = self.cleanup_container(container_name)
@@ -165,6 +187,7 @@ class DockerTestRunner:
                     stdout=result.stdout,
                     stderr=(result.stderr + "\n" if result.stderr else "")
                     + f"Docker cleanup could not be confirmed for {container_name}",
+                    status=TestStatus.INFRASTRUCTURE_ERROR,
                 )
 
             return result
