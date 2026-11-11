@@ -523,3 +523,15 @@ not stored verbatim in the mission description; however, generated model output
 and mission events may include portions of it. The Gemini provider processes
 approved content externally. The implementation still generates standalone code
 and tests; it does not edit or apply patches to registered projects.
+
+## v2.1 — Workspace proposals (experimental)
+
+This release adds the **Workspace proposals** tab for both managed (new) and registered existing Python projects. It snapshots a bounded set of safe text files into `.studio-data/proposal-workspaces/<proposal-id>/`, then requests a structured file proposal from Gemini. The UI shows unified diffs for each proposed create/modify/delete operation. **The original project is never changed by this workflow.** Project-level pytest execution and applying reviewed changes are not implemented in v2.1.
+
+**Test A — new project:** Create a managed project named `hello-fastapi`, open **Workspace proposals**, and request: `Create a FastAPI application with GET /health, pyproject.toml, README.md and pytest tests.` Wait for `ready` and expand the generated diffs. The managed project directory remains empty; generated files are only in the isolated proposal workspace.
+
+**Test B — existing project:** Register an existing Python repository. In **Repository Insights**, select a small source file, click **Review selected content**, then **Approve & go to proposals**. Ask Gemini to modify that approved file and add a pytest test. Review the proposed diffs and verify that the original file is unchanged. Modifying or deleting an existing file without explicitly approving its content is rejected.
+
+**Limitations:** This is a proposal generator, not yet the full Analyst → Developer → Tester repository workflow. It does not run tests on generated projects, apply changes, or create a final export. The model can fail to return valid JSON or propose unsupported operations; those failures are reported in the proposal. Snapshots exclude hidden files, symlinks, common secret paths, binary files, and oversized files, but automatic secret exclusion is not a substitute for checking what you approve. Gemini may still be temporarily unavailable. Provider retry events are not yet surfaced individually in the UI.
+
+Backend tests: `uv run pytest -q -m "not integration"`. Frontend: `cd frontend && npm ci && npm run build`. Start the backend with `uv run uvicorn multi_agent_software_team.api.app:app --reload --reload-dir src --host 127.0.0.1 --port 8000` and frontend with `npm run dev`.

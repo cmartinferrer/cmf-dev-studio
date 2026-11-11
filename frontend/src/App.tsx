@@ -1,3 +1,4 @@
+import ProposalWorkspace from './ProposalWorkspace';
 import RepositoryInsights from './RepositoryInsights';
 import FolderPicker from './FolderPicker';
 import FileExplorer from './FileExplorer';
@@ -12,7 +13,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<Mode | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [workspaceTab, setWorkspaceTab] = useState<'files' | 'insights' | 'missions' | 'details'>('files');
+  const [workspaceTab, setWorkspaceTab] = useState<'files' | 'insights' | 'missions' | 'proposals' | 'details'>('files');
   const [approvedContext, setApprovedContext] = useState<string[]>([]);
   const [approvedDigest, setApprovedDigest] = useState<string | null>(null);
   const [name, setName] = useState('');
@@ -67,10 +68,12 @@ export default function App() {
           <button className={workspaceTab === 'files' ? 'selected' : ''} onClick={() => setWorkspaceTab('files')}><FileCode2 size={17}/> Files</button>
           <button className={workspaceTab === 'insights' ? 'selected' : ''} onClick={() => setWorkspaceTab('insights')}><Search size={17}/> Repository Insights</button>
           <button className={workspaceTab === 'missions' ? 'selected' : ''} onClick={() => setWorkspaceTab('missions')}><Bot size={17}/> Agent missions</button>
+          <button className={workspaceTab === 'proposals' ? 'selected' : ''} onClick={() => setWorkspaceTab('proposals')}><GitBranch size={17}/> Workspace proposals</button>
           <button className={workspaceTab === 'details' ? 'selected' : ''} onClick={() => setWorkspaceTab('details')}><GitBranch size={17}/> Project details</button>
         </nav>
         {workspaceTab === 'files' && <FileExplorer key={active.id} projectId={active.id} />}
-        {workspaceTab === 'insights' && <RepositoryInsights key={active.id} projectId={active.id} approved={approvedContext} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} onGoToMissions={() => setWorkspaceTab('missions')} />}
+        {workspaceTab === 'insights' && <RepositoryInsights key={active.id} projectId={active.id} approved={approvedContext} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} onGoToMissions={() => setWorkspaceTab('missions')} onGoToProposals={() => setWorkspaceTab('proposals')} />}
+        {workspaceTab === 'proposals' && <ProposalWorkspace key={active.id} projectId={active.id} contextPaths={approvedContext} contextDigest={approvedDigest} projectKind={active.kind} />}
         {workspaceTab === 'missions' && <MissionWorkspace key={active.id} projectId={active.id} contextPaths={approvedContext} contextDigest={approvedDigest} />}
       </>}
       </div>

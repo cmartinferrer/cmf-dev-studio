@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from multi_agent_software_team.projects import Project, ProjectManager
 from multi_agent_software_team.projects.explorer import ExplorerError, list_directory, read_file
 from multi_agent_software_team.missions import MissionService
+from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError
 from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
 from multi_agent_software_team.projects.search import search_files
 from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
@@ -57,6 +58,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         data_dir = os.environ.get("STUDIO_DATA_DIR", ".studio-data")
     manager = ProjectManager(data_dir)
     missions = MissionService(manager)
+    workspaces = WorkspaceService(manager)
     missions.recover_interrupted()
     app = FastAPI(title="Multi-Agent Studio API", version="0.1.0")
 
@@ -181,6 +183,33 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if after_id < 0:
             raise HTTPException(status_code=422, detail="after_id must be non-negative")
         return missions.events(run_id, after_id)
+
+    class ProposalRequest(BaseModel):
+        task: str = Field(min_length=1, max_length=4000)
+        context_paths: list[str] = Field(default_factory=list, max_length=8)
+        context_digest: str | None = None
+
+    @app.post("/api/projects/{project_id}/proposals", status_code=status.HTTP_202_ACCEPTED)
+    def create_proposal(project_id: str, request: ProposalRequest) -> dict:
+        try:
+            return workspaces.submit(project_id, request.task, request.context_paths, request.context_digest)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/api/projects/{project_id}/proposals")
+    def list_proposals(project_id: str) -> list[dict]:
+        if manager.get(project_id) is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return workspaces.list(project_id)
+
+    @app.get("/api/proposals/{proposal_id}")
+    def get_proposal(proposal_id: str) -> dict:
+        try:
+            return workspaces.get(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
 
