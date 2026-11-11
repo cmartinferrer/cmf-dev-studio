@@ -468,3 +468,18 @@ Open **http://127.0.0.1:5173**. Vite proxies `/api` to the FastAPI server on `12
 **Opening an existing project:** enter an absolute folder path on the machine running FastAPI. Browsers cannot give the server unrestricted local folder access; a folder picker and safe workspace copy/edit workflow will come later.
 
 **Security:** Both servers are for trusted local development only. The API currently has no authentication; do not expose it to your network or the Internet.
+
+## Studio missions API (backend iteration)
+
+The Studio API now supports asynchronous, persistent mission runs. Run FastAPI locally:
+
+```bash
+uv run uvicorn multi_agent_software_team.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+- `POST /api/projects/{project_id}/missions` with `{"description":"Create a Python function..."}` returns `202` and a run ID.
+- `GET /api/projects/{project_id}/missions` lists saved runs.
+- `GET /api/missions/{run_id}` retrieves status and generated code/tests/attempts when finished.
+- `GET /api/missions/{run_id}/events?after_id=0` retrieves ordered progress events; poll with the last received event ID.
+
+Only one queued/running mission is allowed per project. Runs use Gemini and the Docker test runner, and require the same credentials and local Docker image as the CLI. **Generated files are stored in SQLite, not written to registered project folders.** Existing repositories remain untouched. This is a local-only, unauthenticated API: do not expose it to a network. Process restarts do not resume in-flight missions; recovery, cancellation, streaming and applying changes are future iterations.
