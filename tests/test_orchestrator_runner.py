@@ -130,7 +130,8 @@ def test_orchestrator_fails_when_tests_fail(
     result = orchestrator.run(mission)
 
     assert result.status is MissionStatus.FAILED
-    assert result.attempts == 1
+    assert result.attempts == 3
+    assert runner.run.call_count == 3
     assert "test_failed" in result.feedback
     assert "AssertionError" in result.feedback
 

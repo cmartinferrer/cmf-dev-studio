@@ -1,38 +1,30 @@
+"""Developer agent responsible for generating and revising Python code."""
+
 from multi_agent_software_team.llm.client import LLMClient
 from multi_agent_software_team.models import Mission
 
 
 class DeveloperAgent:
-    """Generate Python source code based on mission requirements.
-
-    The developer uses a language model to produce an implementation
-    that satisfies the requirements defined by the analyst.
-
-    The LLM dependency is injected through the constructor, keeping
-    the agent independent of a specific model provider.
-    """
+    """Generate Python code and revise it using execution feedback."""
 
     def __init__(self, llm: LLMClient) -> None:
-        """Initialize the developer with a language model client.
-
-        Args:
-            llm: Client implementing the LLMClient protocol.
-        """
+        """Initialize the developer with an injected language model client."""
         self.llm = llm
 
     def execute(self, mission: Mission) -> None:
-        """Generate Python code and store it in the shared mission.
+        """Generate an implementation or revise the previous failed version.
 
         Args:
-            mission: Mission containing the description and requirements.
+            mission: Shared state containing requirements and optional feedback.
+
+        Raises:
+            ValueError: If the LLM returns an empty implementation.
         """
         print("[Developer] Generating implementation...")
 
         requirements = "\n".join(
-            f"- {requirement}"
-            for requirement in mission.requirements
+            f"- {requirement}" for requirement in mission.requirements
         )
-
         prompt = (
             "You are an experienced Python software developer.\n"
             "Implement the following task according to its requirements.\n"
@@ -42,11 +34,19 @@ class DeveloperAgent:
             f"Requirements:\n{requirements}"
         )
 
-        code = self.llm.generate(prompt)
+        if mission.feedback and mission.code:
+            prompt += (
+                "\n\nThe previous implementation failed its tests. "
+                "Revise the implementation to satisfy the requirements "
+                "and fix the reported failures.\n\n"
+                f"Previous implementation:\n{mission.code}\n"
+                f"Test feedback:\n{mission.feedback}\n"
+                "Return the complete corrected Python source code."
+            )
 
+        code = self.llm.generate(prompt)
         if not code.strip():
             raise ValueError("Developer generated no valid code")
 
         mission.code = code.strip() + "\n"
-
         print("[Developer] Implementation generated.")

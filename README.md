@@ -8,9 +8,9 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 
 - **Mission management:** Shared mission state using Python dataclasses.
 - **Analyst Agent:** Generates software requirements dynamically using Google Gemini.
-- **Developer Agent:** Generates Python implementations based on the analyst's requirements.
+- **Developer Agent:** Generates Python implementations and revises failed implementations using pytest feedback.
 - **Tester Agent:** Generates pytest tests based on the requirements and generated implementation.
-- **Orchestrator:** Coordinates agents sequentially, manages mission status, handles failures, and supports an optional injected test runner.
+- **Orchestrator:** Coordinates agents, supports optional test execution, and retries implementations after test failures with a configurable attempt limit.
 - **LLM abstraction:** Uses an `LLMClient` protocol to decouple agents from specific providers.
 - **Gemini integration:** Uses the official Google GenAI SDK.
 - **Test runner abstraction:** Uses a `TestRunner` protocol to decouple orchestration from the execution environment.
@@ -69,7 +69,7 @@ The project is developed incrementally, focusing on multi-agent orchestration, s
 
 The orchestrator coordinates three specialized agents: `AnalystAgent` generates requirements, `DeveloperAgent` produces an implementation, and `TesterAgent` generates pytest tests. They share a single `Mission` object containing the mission description, requirements, code, tests, feedback, attempt count, and status.
 
-The agents use the `LLMClient` abstraction to communicate with Gemini. An optional `TestRunner` can validate the generated code after all agents finish. **In the CLI, no runner is configured**, so the example workflow only generates code and tests.
+The agents use the `LLMClient` abstraction to communicate with Gemini. An optional `TestRunner` can validate the generated code after all agents finish. On test failures, the developer may regenerate the implementation using feedback while the original tests remain unchanged. **In the CLI, no runner is configured**, so the example workflow only generates code and tests.
 
 ## Requirements
 
@@ -151,6 +151,25 @@ When a runner is supplied, the orchestrator:
 When no runner is supplied (`Orchestrator(llm=llm)`), the previous workflow is preserved. There are no automatic retries or developer feedback loops yet.
 
 **Safety:** The optional runner integration is verified using mocked responses. Do not inject `DockerTestRunner` into a workflow that passes it untrusted LLM-generated code until an appropriate security review and containment solution are in place.
+
+## Developer Feedback and Retry Policy
+
+When a `TestRunner` is injected, the orchestrator can retry implementations that fail pytest assertions:
+
+1. `AnalystAgent` generates requirements once.
+2. `DeveloperAgent` generates the initial implementation.
+3. `TesterAgent` generates tests once.
+4. The runner evaluates the current implementation against those tests.
+5. On `TEST_FAILED`, the orchestrator stores the failure output in `mission.feedback`, and, if attempts remain, asks `DeveloperAgent` to revise the previous implementation using that feedback.
+6. On `PASSED`, the mission becomes `COMPLETED`. On exhausted attempts or `INFRASTRUCTURE_ERROR`, it becomes `FAILED`.
+
+`max_attempts` defaults to `3` and includes the initial test execution (up to two corrections). `mission.attempts` counts runner invocations and is reset at the start of each run. An orchestrator without a runner retains the original generation-only behavior.
+
+```python
+orchestrator = Orchestrator(llm=llm, runner=trusted_runner, max_attempts=3)
+```
+
+**Security:** This example requires a runner appropriate for the trust level of the input. The CLI still does not configure a runner; the Docker implementation has not been approved for untrusted LLM-generated code. Unit tests exercise retry behavior with mocked runners only.
 
 ## Docker Test Runner
 
