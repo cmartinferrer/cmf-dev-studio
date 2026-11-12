@@ -1,20 +1,85 @@
+
+# ============================================================
+# CMF Dev Studio - Git Ignore
+# ============================================================
+
+# Python
 __pycache__/
-*.py[oc]
 *.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
 build/
 dist/
 wheels/
-*.egg-info
-.pytest_cache/
-.venv
+
+# Virtual environments
 .venv/
+venv/
+
+# Python testing and coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Python tooling
+.mypy_cache/
+.ruff_cache/
+
+# Environment variables and secrets
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# CMF Dev Studio local data
+.studio-data/
 .runner-workspaces/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/coverage/
+frontend/.vite/
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
-.studio-data/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs and editors
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and backup files
+*.bak
+*.tmp
+*.orig
+*~
