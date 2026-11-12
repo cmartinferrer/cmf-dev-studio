@@ -83,3 +83,6 @@ Desktop.ini
 *.tmp
 *.orig
 *~
+
+# TypeScript build cache
+*.tsbuildinfo
