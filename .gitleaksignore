@@ -1,0 +1,5 @@
+# Intentional fake credentials used in repository intelligence tests.
+# These fixtures validate sensitive content detection.
+
+14e46dc8f9dcd866d96fffc86a0840debdbe3425:tests/test_repository_intelligence.py:generic-api-key:82
+ea28b6229e43e81152a1428e5e28e8ab244389ba:tests/test_repository_intelligence.py:generic-api-key:25
