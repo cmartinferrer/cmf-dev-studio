@@ -4,7 +4,7 @@
 
 CMF Dev Studio is an open-source, local-first, browser-based development environment that combines an integrated code editor, a multi-agent AI assistant and isolated automated testing. It helps developers evolve existing repositories or create new projects while retaining control over the files shared with AI and the changes applied to their code.
 
-[![CI](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-19-61DAFB) ![Docker](https://img.shields.io/badge/testing-Docker-2496ED)
+[![CI](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![Dependency Security](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-19-61DAFB) ![Docker](https://img.shields.io/badge/testing-Docker-2496ED)
 
 > **Development status:** Alpha. The Python, Java and Kotlin reference workflows have been validated end to end. The project is actively evolving; review the current limitations before using it with important repositories.
 
@@ -22,6 +22,7 @@ CMF Dev Studio is an open-source, local-first, browser-based development environ
 - [Project structure](#project-structure)
 - [Testing](#testing)
 - [Security and privacy](#security-and-privacy)
+  - [Dependency security](#dependency-security)
 - [Extending the platform](#extending-the-platform)
 - [Current limitations](#current-limitations)
 - [Roadmap](#roadmap)
@@ -294,6 +295,18 @@ For end-to-end verification, open each reference project in the IDE, submit a ch
 - Original repositories are not mounted in test containers. Applying a proposal requires explicit approval and conflict checks.
 - The integrated terminal runs on the host with the user's permissions; it is not the Docker test sandbox.
 - Use trusted repositories only. This application is not a hardened security boundary for hostile code or multi-tenant deployment.
+
+### Dependency security
+
+CMF Dev Studio automatically audits its dependencies for known security vulnerabilities.
+
+- **Frontend:** `npm audit`, blocking high and critical vulnerabilities.
+- **Backend:** `pip-audit`, scanning locked Python production dependencies.
+- **Secret scanning:** Gitleaks, detecting accidentally committed credentials.
+
+Dependency security audits run on pull requests targeting `main`, pushes to `main`, and weekly scheduled executions. They can also be triggered manually from GitHub Actions.
+
+Dependabot provides automated dependency update pull requests. These audits detect known vulnerabilities and do not guarantee that dependencies are free of security issues.
 
 ## Extending the platform
 

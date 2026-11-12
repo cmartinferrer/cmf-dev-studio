@@ -1,0 +1,60 @@
+name: Dependency Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-security:
+    name: Frontend Security
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+  backend-security:
+    name: Backend Security
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Export locked dependencies
+        run: |
+          uv export --locked --no-dev --no-emit-project \
+            --format requirements-txt \
+            --output-file /tmp/requirements.txt
+
+      - name: Audit Python dependencies
+        run: |
+          uvx --python 3.12 pip-audit \
+            --requirement /tmp/requirements.txt \
+            --no-deps
