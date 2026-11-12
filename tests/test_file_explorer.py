@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from multi_agent_software_team.api.app import create_app
+from cmf_dev_studio.api.app import create_app
 
 
 @pytest.fixture

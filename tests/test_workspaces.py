@@ -7,8 +7,8 @@ import types
 
 import pytest
 from fastapi.testclient import TestClient
-from multi_agent_software_team.api.app import create_app
-from multi_agent_software_team.workspaces import WorkspaceError, safe_path, snapshot
+from cmf_dev_studio.api.app import create_app
+from cmf_dev_studio.workspaces import WorkspaceError, safe_path, snapshot
 
 @pytest.mark.parametrize('path', ['../secret.py', '/tmp/x.py', '.env', 'src/.hidden.py', 'src/../../x.py', 'src/a.exe', 'src\\a.py', 'src/.git/config', 'src/a.py:evil'])
 def test_reject_unsafe_paths(path):
@@ -30,11 +30,11 @@ from contextlib import contextmanager
 
 @contextmanager
 def fake_gemini(response):
-    module = types.ModuleType('multi_agent_software_team.llm.gemini')
+    module = types.ModuleType('cmf_dev_studio.llm.gemini')
     class GeminiClient:
         def generate(self, prompt): return response
     module.GeminiClient = GeminiClient
-    with patch.dict(sys.modules, {'multi_agent_software_team.llm.gemini': module}):
+    with patch.dict(sys.modules, {'cmf_dev_studio.llm.gemini': module}):
         yield
 
 def test_new_project_proposal_api(tmp_path):

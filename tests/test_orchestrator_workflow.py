@@ -5,16 +5,16 @@ from unittest.mock import Mock
 
 import pytest
 
-from multi_agent_software_team.agents.developer import DeveloperAgent
-from multi_agent_software_team.agents.tester import TesterAgent as QAAgent
-from multi_agent_software_team.project_runners import select_runner, UnsupportedRunner
-from multi_agent_software_team.orchestrator import Orchestrator
-from multi_agent_software_team.workspaces import validate_operations, WorkspaceError
+from cmf_dev_studio.agents.developer import DeveloperAgent
+from cmf_dev_studio.agents.tester import TesterAgent as QAAgent
+from cmf_dev_studio.project_runners import select_runner, UnsupportedRunner
+from cmf_dev_studio.orchestrator import Orchestrator
+from cmf_dev_studio.workspaces import validate_operations, WorkspaceError
 
 
 
 
-def test_unified_engine_roles_and_permission_validation():
+def test_orchestrator_roles_and_permission_validation():
     responses = [
         json.dumps({'requirements': ['GET /version returns 0.1.0'], 'acceptance': ['GET /version returns a literal version string']}),
         json.dumps({'operations': [{'action': 'modify', 'path': 'src/Main.java', 'content': 'class Main {}'}]}),
@@ -60,8 +60,8 @@ def test_runner_rejects_unsupported_project(tmp_path):
 def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_path, monkeypatch, manifest, source_path):
     """API -> roles -> safe snapshot -> selected runner -> explicit apply."""
     from fastapi.testclient import TestClient
-    from multi_agent_software_team.api.app import create_app
-    import multi_agent_software_team.workspaces as workspaces
+    from cmf_dev_studio.api.app import create_app
+    import cmf_dev_studio.workspaces as workspaces
     import sys, types, time
     from unittest.mock import patch
 
@@ -84,12 +84,12 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_pa
         json.dumps({'operations': [{'action': 'modify', 'path': source_path, 'content': 'revised source'}]}),
         json.dumps({'issues': []}),
     ]
-    module = types.ModuleType('multi_agent_software_team.llm.gemini')
+    module = types.ModuleType('cmf_dev_studio.llm.gemini')
     class FakeGemini:
         def generate(self, prompt):
             return responses.pop(0)
     module.GeminiClient = FakeGemini
-    with patch.dict(sys.modules, {'multi_agent_software_team.llm.gemini': module}):
+    with patch.dict(sys.modules, {'cmf_dev_studio.llm.gemini': module}):
         submitted = client.post(f"/api/projects/{project['id']}/proposals", json={
             'task': 'Add version', 'context_paths': [source_path], 'context_digest': preview['digest']})
         assert submitted.status_code == 202, submitted.text
@@ -119,8 +119,8 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_pa
 
 
 def test_docker_runner_isolated_and_offline(tmp_path, monkeypatch):
-    from multi_agent_software_team.project_runners import execute_runner, RunnerSpec
-    import multi_agent_software_team.project_runners as runners
+    from cmf_dev_studio.project_runners import execute_runner, RunnerSpec
+    import cmf_dev_studio.project_runners as runners
     recorded = {}
     def fake_run(command, **kwargs):
         recorded['command'] = command
@@ -135,8 +135,8 @@ def test_docker_runner_isolated_and_offline(tmp_path, monkeypatch):
 
 
 def test_tampered_workspace_cannot_be_applied(tmp_path, monkeypatch):
-    from multi_agent_software_team.projects.manager import ProjectManager
-    from multi_agent_software_team.workspaces import WorkspaceService, tree_digest
+    from cmf_dev_studio.projects.manager import ProjectManager
+    from cmf_dev_studio.workspaces import WorkspaceService, tree_digest
     manager = ProjectManager(tmp_path / 'data')
     project = manager.create('example')
     service = WorkspaceService(manager)

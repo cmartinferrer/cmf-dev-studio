@@ -1,9 +1,9 @@
 from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
-from multi_agent_software_team.api.app import create_app
-from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
-from multi_agent_software_team.projects.search import search_files
+from cmf_dev_studio.api.app import create_app
+from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
+from cmf_dev_studio.projects.search import search_files
 
 
 def test_folder_picker_is_restricted_to_configured_root(tmp_path, monkeypatch):

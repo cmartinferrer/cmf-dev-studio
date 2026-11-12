@@ -1,10 +1,12 @@
 [project]
-name = "multi-agent-software-team"
-version = "0.1.0"
-description = "Add your description here"
+name = "cmf-dev-studio"
+version = "0.4.1"
+description = "Local-first AI-assisted development environment with multi-agent orchestration and isolated testing"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
-    { name = "Cristian Martín", email = "cmf18.software@gmail.com" }
+    { name = "Cristian Martín Ferrer", email = "cmf18.software@gmail.com" }
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -16,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-multi-agent-software-team = "multi_agent_software_team:main"
+cmf-dev-studio = "cmf_dev_studio:main"
 
 [build-system]
 requires = ["uv_build>=0.13.6,<0.14.0"]

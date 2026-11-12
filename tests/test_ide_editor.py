@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from multi_agent_software_team.api.app import create_app
+from cmf_dev_studio.api.app import create_app
 
 
 def test_editor_save_conflict_and_create(tmp_path):

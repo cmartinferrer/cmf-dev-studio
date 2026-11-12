@@ -3,11 +3,11 @@ WorkspaceService owns snapshots, authorization and persistence; agents own promp
 """
 from __future__ import annotations
 import re
-from multi_agent_software_team.agents.analyst import AnalystAgent
-from multi_agent_software_team.agents.developer import DeveloperAgent, build_workspace_prompt
-from multi_agent_software_team.agents.tester import TesterAgent
-from multi_agent_software_team.contracts import Plan
-from multi_agent_software_team.workflow import WorkflowPolicy
+from cmf_dev_studio.agents.analyst import AnalystAgent
+from cmf_dev_studio.agents.developer import DeveloperAgent, build_workspace_prompt
+from cmf_dev_studio.agents.tester import TesterAgent
+from cmf_dev_studio.contracts import Plan
+from cmf_dev_studio.workflow import WorkflowPolicy
 
 class Orchestrator:
     def __init__(self, llm, policy=None):

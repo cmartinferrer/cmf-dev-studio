@@ -1,9 +1,9 @@
 import json
 from unittest.mock import Mock
 import pytest
-from multi_agent_software_team.orchestrator import Orchestrator, Plan
-from multi_agent_software_team.contracts import PATCH_SCHEMA
-from multi_agent_software_team.workspaces import validate_operations
+from cmf_dev_studio.orchestrator import Orchestrator, Plan
+from cmf_dev_studio.contracts import PATCH_SCHEMA
+from cmf_dev_studio.workspaces import validate_operations
 
 class StructuredProvider:
     def __init__(self):

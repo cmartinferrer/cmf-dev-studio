@@ -1,4 +1,4 @@
-"""HTTP interface for Multi-Agent Studio."""
+"""HTTP interface for CMF Dev Studio."""
 
 from .app import create_app
 

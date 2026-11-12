@@ -1,8 +1,8 @@
 from pathlib import Path
 from unittest.mock import Mock
-from multi_agent_software_team.orchestrator import Orchestrator
-from multi_agent_software_team.api.app import create_app
-from multi_agent_software_team.contracts import Plan
+from cmf_dev_studio.orchestrator import Orchestrator
+from cmf_dev_studio.api.app import create_app
+from cmf_dev_studio.contracts import Plan
 
 
 def test_repository_is_only_execution_entrypoint(tmp_path):
@@ -10,7 +10,7 @@ def test_repository_is_only_execution_entrypoint(tmp_path):
     paths = [route.path for route in app.routes]
     assert not any('/missions' in path for path in paths)
     assert '/api/projects/{project_id}/proposals' in paths
-    root = Path(__file__).resolve().parents[1] / 'src/multi_agent_software_team'
+    root = Path(__file__).resolve().parents[1] / 'src/cmf_dev_studio'
     assert not (root / 'unified_engine.py').exists()
     assert not (root / 'missions.py').exists()
 

@@ -14,12 +14,12 @@ from pathlib import Path, PurePosixPath
 from threading import Thread
 from uuid import uuid4
 
-from multi_agent_software_team.projects.manager import ProjectManager
-from multi_agent_software_team.workflow import WorkflowPolicy
-from multi_agent_software_team.orchestrator import Orchestrator
-from multi_agent_software_team.contracts import Plan
-from multi_agent_software_team.agents.developer import build_workspace_prompt
-from multi_agent_software_team.project_runners import select_runner, execute_runner, UnsupportedRunner
+from cmf_dev_studio.projects.manager import ProjectManager
+from cmf_dev_studio.workflow import WorkflowPolicy
+from cmf_dev_studio.orchestrator import Orchestrator
+from cmf_dev_studio.contracts import Plan
+from cmf_dev_studio.agents.developer import build_workspace_prompt
+from cmf_dev_studio.project_runners import select_runner, execute_runner, UnsupportedRunner
 
 EXCLUDED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', '.studio-data', '.runner-workspaces', '.pytest_cache', '.mypy_cache', '.tox', '.env', '.env.local', '.env.production', '.env.development', 'secrets', '.ssh'}
 MAX_FILES = 350
@@ -226,7 +226,7 @@ class WorkspaceService:
             raise WorkspaceError('Task must be between 1 and 4000 characters')
         if len(selected_paths) > 8 or len(set(selected_paths)) != len(selected_paths):
             raise WorkspaceError('Select at most 8 unique reference files')
-        from multi_agent_software_team.projects.intelligence import prepare_context
+        from cmf_dev_studio.projects.intelligence import prepare_context
         context = prepare_context(project.path, selected_paths)
         if selected_paths and context_digest != context['digest']:
             raise WorkspaceError('Review and approve repository context before generating a proposal')
@@ -307,7 +307,7 @@ class WorkspaceService:
         try:
             self._update(proposal_id, 'running')
             from dotenv import load_dotenv
-            from multi_agent_software_team.llm.gemini import GeminiClient
+            from cmf_dev_studio.llm.gemini import GeminiClient
             load_dotenv()
             client = GeminiClient()
             engine = Orchestrator(client)
@@ -331,7 +331,6 @@ import subprocess
 import threading
 
 _APPLY_LOCK = threading.RLock()
-TEST_IMAGE = 'multi-agent-studio-project-tests:2.2'
 
 
 def _checked_target(root: Path, path: str) -> Path:
@@ -408,7 +407,7 @@ def _test_proposal_locked(self: WorkspaceService, proposal_id: str) -> dict:
             return False, output
         try:
             from dotenv import load_dotenv
-            from multi_agent_software_team.llm.gemini import GeminiClient
+            from cmf_dev_studio.llm.gemini import GeminiClient
             load_dotenv()
             engine = Orchestrator(GeminiClient())
         except Exception as exc:

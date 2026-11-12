@@ -28,14 +28,14 @@ def select_runner(workspace: Path) -> RunnerSpec:
     if 'pom.xml' in paths:
         if not any(p.startswith('src/test/') and p.endswith(('.java', '.kt')) for p in paths):
             raise UnsupportedRunner('Maven project has no test sources; generate tests before verification')
-        return RunnerSpec('maven', 'multi-agent-studio-maven-tests:4', ('mvn', '-o', '-B', 'test', '-DfailIfNoTests=true', '-Dstyle.color=never'), 240)
+        return RunnerSpec('maven', 'cmf-dev-studio-runner-maven:0.4.1', ('mvn', '-o', '-B', 'test', '-DfailIfNoTests=true', '-Dstyle.color=never'), 240)
     if 'build.gradle.kts' in paths or 'build.gradle' in paths:
         if not any(p.startswith('src/test/') and p.endswith(('.java', '.kt')) for p in paths):
             raise UnsupportedRunner('Gradle project has no test sources; generate tests before verification')
         # Never execute a repository-provided gradlew shell script.
-        return RunnerSpec('gradle', 'multi-agent-studio-gradle-tests:4', ('gradle', '--offline', '--no-daemon', 'test', '--console=plain'), 240)
+        return RunnerSpec('gradle', 'cmf-dev-studio-runner-gradle:0.4.1', ('gradle', '--offline', '--no-daemon', 'test', '--console=plain'), 240)
     if any(p.endswith('.py') for p in paths):
-        return RunnerSpec('pytest', 'multi-agent-studio-project-tests:2.2', ('python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider'), 120)
+        return RunnerSpec('pytest', 'cmf-dev-studio-runner-python:0.4.1', ('python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider'), 120)
     raise UnsupportedRunner('No supported test runner (Python/pytest, Java/Maven or Java/Kotlin/Gradle)')
 
 

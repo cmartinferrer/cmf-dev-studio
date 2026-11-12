@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from multi_agent_software_team.projects import ProjectKind, ProjectManager
+from cmf_dev_studio.projects import ProjectKind, ProjectManager
 
 
 def test_create_managed_workspace_and_reload(tmp_path):

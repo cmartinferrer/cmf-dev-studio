@@ -2,9 +2,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
-from multi_agent_software_team.projects.explorer import ExplorerError
-from multi_agent_software_team.api.app import create_app
+from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.projects.explorer import ExplorerError
+from cmf_dev_studio.api.app import create_app
 
 
 def test_inventory_is_bounded_and_ignores_secrets(tmp_path: Path):

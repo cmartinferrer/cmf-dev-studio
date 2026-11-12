@@ -1,5 +1,5 @@
 import pytest
-from multi_agent_software_team.workspaces import (
+from cmf_dev_studio.workspaces import (
     WorkspaceError, safe_path, detect_languages, validate_operations, build_workspace_prompt,
 )
 

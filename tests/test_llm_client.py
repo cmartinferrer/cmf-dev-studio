@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 
-from multi_agent_software_team.llm.client import LLMClient
+from cmf_dev_studio.llm.client import LLMClient
 
 
 def test_llm_client_accepts_compatible_implementations():

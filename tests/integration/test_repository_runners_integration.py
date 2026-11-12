@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from multi_agent_software_team.project_runners import (
+from cmf_dev_studio.project_runners import (
     execute_runner,
     select_runner,
 )

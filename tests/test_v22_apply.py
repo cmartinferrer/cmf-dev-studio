@@ -1,8 +1,8 @@
 from pathlib import Path
 import json
 import pytest
-from multi_agent_software_team.projects.manager import ProjectManager
-from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError, digest, tree_digest
+from cmf_dev_studio.projects.manager import ProjectManager
+from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError, digest, tree_digest
 
 
 def proposal(tmp_path, existing=False):

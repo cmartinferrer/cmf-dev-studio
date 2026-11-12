@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from multi_agent_software_team.api.terminal import allowed_local_origin
+from cmf_dev_studio.api.terminal import allowed_local_origin
 
 
 def test_terminal_requires_local_browser_origin():

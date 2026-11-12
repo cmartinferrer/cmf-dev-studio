@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 import difflib
 from typing import Callable
-from multi_agent_software_team.llm.client import LLMClient
-from multi_agent_software_team.contracts import Plan, structured_response, PLAN_SCHEMA, PATCH_SCHEMA, REVIEW_SCHEMA
-from multi_agent_software_team.workflow import acceptance_guidance
+from cmf_dev_studio.llm.client import LLMClient
+from cmf_dev_studio.contracts import Plan, structured_response, PLAN_SCHEMA, PATCH_SCHEMA, REVIEW_SCHEMA
+from cmf_dev_studio.workflow import acceptance_guidance
 
 
 class DeveloperAgent:

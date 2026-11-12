@@ -1,23 +1,20 @@
-"""Local-only REST API for the project registry.
-
-No endpoint runs agents or reads/writes files in registered repositories.
-"""
+"""Local REST API for projects, editor operations and AI proposals."""
 
 import os
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, status, WebSocket
-from multi_agent_software_team.api.terminal import terminal_socket
+from cmf_dev_studio.api.terminal import terminal_socket
 from pydantic import BaseModel, Field
 
-from multi_agent_software_team.projects import Project, ProjectManager
-from multi_agent_software_team.projects.explorer import ExplorerError, list_directory, read_file
-from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError
-from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
-from multi_agent_software_team.projects.search import search_files
-from multi_agent_software_team.projects.editor import read_editable, write_editable, delete_editable, EditConflict
-from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.projects import Project, ProjectManager
+from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
+from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError
+from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
+from cmf_dev_studio.projects.search import search_files
+from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict
+from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
 
 
 class ProjectResponse(BaseModel):
@@ -59,7 +56,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         data_dir = os.environ.get("STUDIO_DATA_DIR", ".studio-data")
     manager = ProjectManager(data_dir)
     workspaces = WorkspaceService(manager)
-    app = FastAPI(title="Multi-Agent Studio API", version="0.1.0")
+    app = FastAPI(title="CMF Dev Studio API", version="0.4.1")
 
     @app.websocket("/api/projects/{project_id}/terminal")
     async def project_terminal(websocket: WebSocket, project_id: str) -> None:

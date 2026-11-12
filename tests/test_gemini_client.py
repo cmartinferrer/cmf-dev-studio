@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from multi_agent_software_team.llm.gemini import GeminiClient
+from cmf_dev_studio.llm.gemini import GeminiClient
 
 
 def test_gemini_client_generates_text():

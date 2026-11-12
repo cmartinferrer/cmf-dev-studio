@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from multi_agent_software_team.api.app import create_app
+from cmf_dev_studio.api.app import create_app
 
 
 def test_health_and_empty_projects(tmp_path):

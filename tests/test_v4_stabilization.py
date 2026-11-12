@@ -1,8 +1,8 @@
 import json
 from unittest.mock import Mock
 import pytest
-from multi_agent_software_team.orchestrator import Orchestrator, Plan
-from multi_agent_software_team.workspaces import validate_operations, WorkspaceError
+from cmf_dev_studio.orchestrator import Orchestrator, Plan
+from cmf_dev_studio.workspaces import validate_operations, WorkspaceError
 
 
 def test_invalid_python_is_rejected_before_execution():
@@ -46,8 +46,8 @@ def test_syntax_error_is_repaired_in_generation():
 def test_existing_broken_proposal_repair_or_infrastructure_stop(tmp_path, monkeypatch, infra):
     import sys, types, subprocess
     from pathlib import Path
-    import multi_agent_software_team.workspaces as ws
-    from multi_agent_software_team.projects.manager import ProjectManager
+    import cmf_dev_studio.workspaces as ws
+    from cmf_dev_studio.projects.manager import ProjectManager
     manager = ProjectManager(tmp_path/'data'); project = manager.create('demo')
     service = ws.WorkspaceService(manager); pid = 'a'*32
     baseline = service.baselines/pid; baseline.mkdir()
@@ -67,7 +67,7 @@ def test_existing_broken_proposal_repair_or_infrastructure_stop(tmp_path, monkey
         return result.returncode==0, f'Runner: pytest (exit {result.returncode}; test_result)\n'+result.stdout
     monkeypatch.setattr(ws,'execute_runner',runner)
     llm=Mock(); llm.generate.side_effect=[json.dumps({'operations':[{'action':'modify','path':'test_app.py','content':original['test_app.py'].decode()+'\ndef test_greeting():\n    assert "Hello" == "Hello"\n'}]}),'{"issues": []}']
-    module=types.ModuleType('multi_agent_software_team.llm.gemini'); module.GeminiClient=lambda:llm
+    module=types.ModuleType('cmf_dev_studio.llm.gemini'); module.GeminiClient=lambda:llm
     monkeypatch.setitem(sys.modules,module.__name__,module)
     result=service.test(pid)
     assert result['status']==('test_failed' if infra else 'tested'), result

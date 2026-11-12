@@ -747,8 +747,8 @@ wheels = [
 ]
 
 [[package]]
-name = "multi-agent-software-team"
-version = "0.1.0"
+name = "cmf-dev-studio"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

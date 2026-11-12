@@ -1,7 +1,7 @@
 from pathlib import Path
 import pytest
-from multi_agent_software_team.projects.intelligence import prepare_context, credential_findings
-from multi_agent_software_team.projects.explorer import ExplorerError
+from cmf_dev_studio.projects.intelligence import prepare_context, credential_findings
+from cmf_dev_studio.projects.explorer import ExplorerError
 
 
 def test_documentation_mention_does_not_trigger(tmp_path: Path):
@@ -27,8 +27,8 @@ def test_gemini_retries_transient_errors(monkeypatch):
         google = types.ModuleType('google')
         monkeypatch.setitem(sys.modules, 'google', google)
     monkeypatch.setattr(google, 'genai', types.SimpleNamespace(Client=object), raising=False)
-    sys.modules.pop('multi_agent_software_team.llm.gemini', None)
-    from multi_agent_software_team.llm.gemini import GeminiClient
+    sys.modules.pop('cmf_dev_studio.llm.gemini', None)
+    from cmf_dev_studio.llm.gemini import GeminiClient
     sdk = Mock()
     sdk.models.generate_content.side_effect = [RuntimeError('503 UNAVAILABLE'), Mock(text='ok')]
     client = GeminiClient(sdk_client=sdk, retry_base_seconds=0)
@@ -45,8 +45,8 @@ def test_gemini_does_not_retry_bad_request(monkeypatch):
         google = types.ModuleType('google')
         monkeypatch.setitem(sys.modules, 'google', google)
     monkeypatch.setattr(google, 'genai', types.SimpleNamespace(Client=object), raising=False)
-    sys.modules.pop('multi_agent_software_team.llm.gemini', None)
-    from multi_agent_software_team.llm.gemini import GeminiClient
+    sys.modules.pop('cmf_dev_studio.llm.gemini', None)
+    from cmf_dev_studio.llm.gemini import GeminiClient
     sdk = Mock()
     sdk.models.generate_content.side_effect = RuntimeError('400 INVALID_ARGUMENT')
     with pytest.raises(RuntimeError):

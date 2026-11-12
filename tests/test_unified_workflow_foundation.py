@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from multi_agent_software_team.workflow import WorkflowPolicy, identify_technology, acceptance_guidance
-from multi_agent_software_team.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.workflow import WorkflowPolicy, identify_technology, acceptance_guidance
+from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
 
 
 def test_shared_retry_policy():

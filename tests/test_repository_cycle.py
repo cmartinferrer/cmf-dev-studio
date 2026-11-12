@@ -1,8 +1,8 @@
 from unittest.mock import Mock
 import pytest
-from multi_agent_software_team.orchestrator import Orchestrator
-from multi_agent_software_team.workflow import WorkflowPolicy
-from multi_agent_software_team.project_runners import select_runner, execute_runner
+from cmf_dev_studio.orchestrator import Orchestrator
+from cmf_dev_studio.workflow import WorkflowPolicy
+from cmf_dev_studio.project_runners import select_runner, execute_runner
 
 @pytest.mark.parametrize('name', ['pytest','maven','gradle'])
 def test_cycle_repairs_only_test_failures(name):
@@ -20,7 +20,7 @@ def test_cycle_stops_on_infrastructure():
 @pytest.mark.parametrize('directory,name,cache', [('java-maven','maven','/tmp/maven/repository'),('kotlin-gradle','gradle','/tmp/gradle')])
 def test_jvm_example_runner(directory,name,cache,monkeypatch):
     from pathlib import Path
-    from multi_agent_software_team import project_runners
+    from cmf_dev_studio import project_runners
     root = Path(__file__).resolve().parents[1] / 'examples' / directory
     spec = select_runner(root)
     assert spec.name == name
