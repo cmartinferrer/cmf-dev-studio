@@ -105,3 +105,6 @@
 .chat-context-actions{display:flex;gap:8px;margin-top:8px}
 .chat-context-inline pre{white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
 .chat-acceptance{font-size:12px;margin:8px 0;opacity:.9}
+
+.chat-context-required{flex-direction:column;align-items:stretch;min-width:0;color:inherit;overflow-wrap:anywhere}
+.chat-context-required .chat-secondary-action{margin:4px 0 0;width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:normal;flex-shrink:0}

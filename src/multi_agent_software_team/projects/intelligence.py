@@ -21,6 +21,7 @@ MAX_CONTEXT_BYTES = 32 * 1024
 SOURCE_EXTENSIONS = {'.py', '.java', '.kt', '.js', '.jsx', '.ts', '.tsx', '.go', '.rs', '.swift', '.md'}
 MANIFESTS = {'pyproject.toml': 'Python / pyproject', 'pom.xml': 'Java / Maven',
              'build.gradle': 'Java / Gradle', 'build.gradle.kts': 'Kotlin / Gradle',
+             'settings.gradle': 'Gradle settings', 'settings.gradle.kts': 'Gradle settings',
              'package.json': 'JavaScript / Node', 'Cargo.toml': 'Rust / Cargo',
              'go.mod': 'Go modules'}
 SENSITIVE = re.compile(r'(secret|credential|password|token|private|\.pem$|\.key$|\.p12$|\.pfx$|id_rsa|\.env|config|settings|lock$)', re.I)
@@ -45,8 +46,12 @@ def credential_findings(content: str) -> list[tuple[int, str]]:
 
 
 
+def _sensitive_name(name: str) -> bool:
+    return bool(SENSITIVE.search(name))
+
+
 def _eligible(path: Path) -> bool:
-    return (path.name in MANIFESTS or path.suffix.lower() in SOURCE_EXTENSIONS) and not SENSITIVE.search(path.name)
+    return (path.name in MANIFESTS or path.suffix.lower() in SOURCE_EXTENSIONS) and (path.name in MANIFESTS or not _sensitive_name(path.name))
 
 
 def analyze_repository(root: Path) -> dict:
@@ -68,7 +73,7 @@ def analyze_repository(root: Path) -> dict:
             if visited > MAX_VISITS:
                 truncated = True
                 break
-            if child.name.startswith('.') or child.name in IGNORED or SENSITIVE.search(child.name) or child.is_symlink():
+            if child.name.startswith('.') or child.name in IGNORED or child.is_symlink() or (_sensitive_name(child.name) and not (child.is_file() and child.name in MANIFESTS)):
                 continue
             if child.is_dir():
                 pending.append(child)
@@ -108,7 +113,7 @@ def prepare_context(root: Path, paths: list[str]) -> dict:
     total = 0
     for path in paths:
         target = _target(root, path)
-        if not target.is_file() or not _eligible(target) or any(SENSITIVE.search(part) for part in Path(path).parts):
+        if not target.is_file() or not _eligible(target) or any(_sensitive_name(part) for part in Path(path).parts[:-1]):
             raise ExplorerError('File is not eligible for LLM context')
         size = target.stat().st_size
         if size > MAX_FILE_BYTES:

@@ -66,3 +66,19 @@ def test_digest_changes_when_file_changes(tmp_path: Path):
     assert before != prepare_context(tmp_path, ['main.py'])['digest']
 
 
+
+
+@pytest.mark.parametrize('manifest', ['settings.gradle', 'settings.gradle.kts'])
+def test_gradle_settings_context(tmp_path: Path, manifest: str):
+    (tmp_path / manifest).write_text('rootProject.name = "demo"')
+    (tmp_path / 'settings.py').write_text('x = 1')
+    (tmp_path / 'secrets').mkdir()
+    (tmp_path / 'secrets' / manifest).write_text('x = 1')
+    assert [f['path'] for f in analyze_repository(tmp_path)['candidates']] == [manifest]
+    assert prepare_context(tmp_path, [manifest])['files'][0]['path'] == manifest
+    for path in ['settings.py', f'secrets/{manifest}']:
+        with pytest.raises(ExplorerError):
+            prepare_context(tmp_path, [path])
+    (tmp_path / manifest).write_text('password = "abcdefgh123456"')
+    with pytest.raises(ExplorerError, match='credential'):
+        prepare_context(tmp_path, [manifest])
