@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 import pytest
 from multi_agent_software_team.projects.manager import ProjectManager
-from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError, digest
+from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError, digest, tree_digest
 
 
 def proposal(tmp_path, existing=False):
@@ -19,7 +19,7 @@ def proposal(tmp_path, existing=False):
     workspace.mkdir()
     (workspace / 'main.py').write_text('print(2)\n')
     with service._db() as db:
-        db.execute("INSERT INTO workspace_proposals(id,project_id,status,task,created_at,changes) VALUES (?,?,?,?,?,?)", (proposal_id,project.id,'tested','task','now',json.dumps([{'action':'create','path':'main.py','before_sha256':None,'size':9,'diff':''}])))
+        db.execute("INSERT INTO workspace_proposals(id,project_id,status,task,created_at,changes,tested_digest) VALUES (?,?,?,?,?,?,?)", (proposal_id,project.id,'tested','task','now',json.dumps([{'action':'create','path':'main.py','before_sha256':None,'size':9,'diff':''}]),tree_digest(workspace)))
     return service, project, proposal_id
 
 

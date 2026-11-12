@@ -1,6 +1,7 @@
 """Isolated, review-only repository workspaces and structured AI proposals."""
 from __future__ import annotations
 
+import ast
 import difflib
 import hashlib
 import json
@@ -15,6 +16,8 @@ from uuid import uuid4
 
 from multi_agent_software_team.projects.manager import ProjectManager
 from multi_agent_software_team.workflow import WorkflowPolicy, identify_technology, acceptance_guidance
+from multi_agent_software_team.unified_engine import UnifiedEngine, Plan
+from multi_agent_software_team.project_runners import select_runner, execute_runner, UnsupportedRunner
 
 EXCLUDED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', '.studio-data', '.runner-workspaces', '.pytest_cache', '.mypy_cache', '.tox', '.env', '.env.local', '.env.production', '.env.development', 'secrets', '.ssh'}
 MAX_FILES = 350
@@ -38,6 +41,19 @@ def safe_path(value: str) -> Path:
 
 def digest(content: bytes | None) -> str | None:
     return hashlib.sha256(content).hexdigest() if content is not None else None
+
+
+def tree_digest(root: Path) -> str:
+    h = hashlib.sha256()
+    for file in sorted(root.rglob('*')):
+        if file.is_symlink():
+            raise WorkspaceError('Symlink found in isolated workspace')
+        if file.is_file():
+            h.update(file.relative_to(root).as_posix().encode('utf-8'))
+            h.update(b'\0')
+            h.update(file.read_bytes())
+            h.update(b'\0')
+    return h.hexdigest()
 
 
 def snapshot(source: Path, target: Path) -> dict[str, bytes]:
@@ -135,6 +151,13 @@ def validate_operations(operations: object, original: dict[str, bytes], approved
         content = op.get('content', '')
         if not isinstance(content, str) or len(content.encode('utf-8')) > MAX_FILE:
             raise WorkspaceError('Invalid or oversized file content')
+        if action != 'delete' and '\x00' in content:
+            raise WorkspaceError('NUL bytes are not allowed in source files')
+        if action != 'delete' and path.endswith('.py'):
+            try:
+                ast.parse(content, filename=path)
+            except SyntaxError as exc:
+                raise WorkspaceError(f'Syntax error in {path}:{exc.lineno}: {exc.msg}') from exc
 
 
 class WorkspaceService:
@@ -142,6 +165,8 @@ class WorkspaceService:
         self.manager = manager
         self.root = manager.data_dir / 'proposal-workspaces'
         self.root.mkdir(parents=True, exist_ok=True)
+        self.baselines = manager.data_dir / 'proposal-baselines'
+        self.baselines.mkdir(parents=True, exist_ok=True)
         with self._db() as db:
             db.execute('''CREATE TABLE IF NOT EXISTS workspace_proposals (
                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL,
@@ -150,6 +175,9 @@ class WorkspaceService:
             cols = {r[1] for r in db.execute('PRAGMA table_info(workspace_proposals)')}
             if 'test_output' not in cols:
                 db.execute("ALTER TABLE workspace_proposals ADD COLUMN test_output TEXT NOT NULL DEFAULT ''")
+            for name, definition in [('approved_paths', "TEXT NOT NULL DEFAULT '[]'"), ('plan', "TEXT NOT NULL DEFAULT '{}'"), ('attempts', 'INTEGER NOT NULL DEFAULT 0'), ('tested_digest', "TEXT NOT NULL DEFAULT ''"), ('agent_stage', "TEXT NOT NULL DEFAULT ''")]:
+                if name not in cols:
+                    db.execute(f'ALTER TABLE workspace_proposals ADD COLUMN {name} {definition}')
 
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
@@ -198,6 +226,8 @@ class WorkspaceService:
     def get(self, proposal_id: str) -> dict:
         row = self._get(proposal_id)
         row['changes'] = json.loads(row['changes'])
+        row['approved_paths'] = json.loads(row['approved_paths'])
+        row['plan'] = json.loads(row['plan'])
         return row
 
     def list(self, project_id: str) -> list[dict]:
@@ -225,9 +255,19 @@ class WorkspaceService:
         except Exception:
             shutil.rmtree(workspace, ignore_errors=True)
             raise
+        for file in context['files']:
+            if original.get(file['path']) != file['content'].encode('utf-8'):
+                shutil.rmtree(workspace, ignore_errors=True)
+                raise WorkspaceError('Approved context changed during snapshot; review again')
+        baseline = self.baselines / proposal_id
+        baseline.mkdir()
+        for name, data in original.items():
+            destination = baseline / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(data)
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as db:
-            db.execute('INSERT INTO workspace_proposals(id,project_id,status,task,created_at) VALUES (?,?,?,?,?)', (proposal_id, project_id, 'queued', task, now))
+            db.execute('INSERT INTO workspace_proposals(id,project_id,status,task,created_at,approved_paths) VALUES (?,?,?,?,?,?)', (proposal_id, project_id, 'queued', task, now, json.dumps(selected_paths)))
         Thread(target=self._generate, args=(proposal_id, task, context, original), daemon=True).start()
         return self.get(proposal_id)
 
@@ -235,77 +275,89 @@ class WorkspaceService:
         with self._db() as db:
             db.execute('UPDATE workspace_proposals SET status=?,error=?,changes=? WHERE id=?', (status, error, json.dumps(changes or []), proposal_id))
 
+    def _stage(self, proposal_id: str, stage: str, *, plan: Plan | None = None):
+        with self._db() as db:
+            if plan is None:
+                db.execute('UPDATE workspace_proposals SET agent_stage=? WHERE id=?', (stage, proposal_id))
+            else:
+                db.execute('UPDATE workspace_proposals SET agent_stage=?,plan=? WHERE id=?',
+                           (stage, json.dumps({'requirements': plan.requirements, 'acceptance': plan.acceptance}), proposal_id))
+
+    def _write_operations(self, proposal_id: str, operations: list[dict], original: dict[str, bytes]) -> list[dict]:
+        workspace = self.root / proposal_id
+        # Clear previous generated files, never the baseline or the real project.
+        for stale in sorted(workspace.rglob('*'), reverse=True):
+            if stale.is_symlink():
+                stale.unlink()
+            elif stale.is_file():
+                stale.unlink()
+            elif stale.is_dir():
+                try:
+                    stale.rmdir()
+                except OSError:
+                    pass
+        for relative, previous in original.items():
+            dest = workspace / safe_path(relative)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(previous)
+        changes = []
+        for operation in operations:
+            action, path = operation['action'], operation['path']
+            relative = safe_path(path)
+            previous = original.get(path)
+            content = '' if action == 'delete' else operation['content']
+            dest = workspace / relative
+            if action == 'delete':
+                dest.unlink(missing_ok=True)
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(content, encoding='utf-8')
+            before = previous.decode('utf-8') if previous is not None else ''
+            diff = ''.join(difflib.unified_diff(before.splitlines(keepends=True), content.splitlines(keepends=True),
+                fromfile=f'a/{path}' if previous is not None else '/dev/null',
+                tofile=f'b/{path}' if action != 'delete' else '/dev/null'))
+            changes.append({'action': action, 'path': path, 'diff': diff,
+                            'before_sha256': digest(previous), 'size': len(content.encode('utf-8'))})
+        return changes
+
     def _generate(self, proposal_id: str, task: str, context: dict, original: dict[str, bytes]):
         try:
             self._update(proposal_id, 'running')
             from dotenv import load_dotenv
             from multi_agent_software_team.llm.gemini import GeminiClient
             load_dotenv()
+            client = GeminiClient()
+            engine = UnifiedEngine(client)
             inventory = '\n'.join(sorted(original))[:12000]
             approved = '\n\n'.join(f"FILE: {f['path']}\n{f['content']}" for f in context['files'])
-            languages = detect_languages(original)
-            prompt = build_workspace_prompt(task, inventory, approved, languages)
-            client = GeminiClient()
             approved_paths = {f['path'] for f in context['files']}
-            operations = None
-            last_issue = ''
-            # Repair invalid model output without ever granting new file permissions.
-            for attempt in range(WorkflowPolicy().max_attempts):
-                candidate = prompt if attempt == 0 else (
-                    prompt + "\nPREVIOUS RESPONSE FAILED VALIDATION: " + last_issue +
-                    "\nReturn a corrected JSON object. Do not request additional file permissions."
-                )
-                response = client.generate(candidate).strip()
-                if response.startswith('```'):
-                    response = re.sub(r'^```(?:json)?\s*|\s*```$', '', response, flags=re.I).strip()
-                try:
-                    parsed = json.loads(response)
-                    proposed = parsed['operations']
-                    validate_operations(proposed, original, approved_paths)
-                    operations = proposed
-                    break
-                except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
-                    last_issue = str(exc)[:220]
-            if operations is None:
-                raise WorkspaceError('Could not prepare a safe change. ' + last_issue)
-            changes = []
-            workspace = self.root / proposal_id
-            seen = set()
-            for operation in operations:
-                if not isinstance(operation, dict):
-                    raise WorkspaceError('Invalid operation')
-                action = operation.get('action')
-                path = operation.get('path')
-                relative = safe_path(path)
-                if path in seen:
-                    raise WorkspaceError('Duplicate operation on same file')
-                seen.add(path)
-                previous = original.get(path)
-                if action == 'create':
-                    if previous is not None:
-                        raise WorkspaceError(f'Cannot create existing file: {path}')
-                elif action in ('modify', 'delete'):
-                    if previous is None or path not in approved_paths:
-                        raise WorkspaceError(f'Cannot change unapproved existing file: {path}')
-                else:
-                    raise WorkspaceError('Unknown file operation')
-                content = operation.get('content', '')
-                if not isinstance(content, str) or len(content.encode('utf-8')) > MAX_FILE:
-                    raise WorkspaceError('Invalid or oversized file content')
-                updated = '' if action == 'delete' else content
-                target = workspace / relative
-                if action == 'delete':
-                    target.unlink()
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_text(updated, encoding='utf-8')
-                before = previous.decode('utf-8') if previous is not None else ''
-                diff = ''.join(difflib.unified_diff(before.splitlines(keepends=True), updated.splitlines(keepends=True), fromfile=f'a/{path}' if previous is not None else '/dev/null', tofile=f'b/{path}' if action != 'delete' else '/dev/null'))
-                changes.append({'action': action, 'path': path, 'diff': diff, 'before_sha256': digest(previous), 'size': len(updated.encode('utf-8'))})
+            languages = detect_languages(original)
+            self._stage(proposal_id, 'analyst')
+            plan = engine.plan_patch(task, inventory, approved, languages)
+            self._stage(proposal_id, 'developer', plan=plan)
+            prompt = build_workspace_prompt(task, inventory, approved, languages)
+            def validate(operations):
+                validate_operations(operations, original, approved_paths)
+            operations = _reviewed_patch(engine, task, prompt, plan, original, approved_paths, validate,
+                                         lambda stage: self._stage(proposal_id, stage))
+            changes = self._write_operations(proposal_id, operations, original)
             self._update(proposal_id, 'ready', changes=changes)
+            self._stage(proposal_id, 'awaiting_tests')
         except Exception as exc:
-            # No prompt or generated code in errors.
             self._update(proposal_id, 'failed', error=f'{type(exc).__name__}: {str(exc)[:400]}')
+            self._stage(proposal_id, 'failed')
+
+def _reviewed_patch(engine, task, prompt, plan, original, approved_paths, validate, stage, feedback=''):
+    for _ in range(WorkflowPolicy().max_attempts):
+        stage('developer_repair' if feedback else 'developer')
+        operations = engine.generate_patch(prompt, plan, feedback=feedback, validate=validate)
+        stage('tester')
+        issues = engine.review_patch(task, plan, operations, original=original, approved_paths=approved_paths)
+        if not issues:
+            return operations
+        feedback += '\nTester review: ' + '; '.join(issues)
+    raise WorkspaceError('Tester review unresolved: ' + '; '.join(issues))
+
 
 # v2.2: verified application and isolated project-level test execution.
 import subprocess
@@ -329,43 +381,101 @@ def _checked_target(root: Path, path: str) -> Path:
 
 
 def _test_proposal(self: WorkspaceService, proposal_id: str) -> dict:
+    with _APPLY_LOCK:
+        try:
+            return _test_proposal_locked(self, proposal_id)
+        except Exception as exc:
+            with self._db() as db:
+                db.execute("UPDATE workspace_proposals SET status='test_failed', tested_digest='', agent_stage='test_failed', test_output=? WHERE id=? AND status='running'", (str(exc)[:500], proposal_id))
+            raise
+
+def _test_proposal_locked(self: WorkspaceService, proposal_id: str) -> dict:
     row = self.get(proposal_id)
     if row['status'] not in ('ready', 'tested', 'test_failed'):
         raise WorkspaceError('Proposal must be ready before testing')
     workspace = self.root / proposal_id
     if not workspace.is_dir():
         raise WorkspaceError('Proposal workspace missing')
-    # The current Docker runner is Python-specific; never claim Java/Kotlin tests passed.
     project = self.manager.get(row['project_id'])
     if project is None:
         raise WorkspaceError('Project not found')
-    repo_files = {p.relative_to(self.root / proposal_id).as_posix() for p in (self.root / proposal_id).rglob('*') if p.is_file()}
-    technology = identify_technology(repo_files)
-    if technology.test_adapter != 'python-pytest':
-        raise WorkspaceError('No isolated test adapter configured for ' + (', '.join(technology.languages) or 'this project') + '. Changes remain isolated; they cannot be applied as verified.')
-    # Docker runs with no network, read-only project files, capped CPU/memory and no privileges.
-    command = [
-        'docker', 'run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
-        '--security-opt', 'no-new-privileges', '--pids-limit', '128', '--memory', '512m',
-        '--cpus', '1', '--user', '10001:10001', '--tmpfs', '/tmp:rw,nosuid,noexec,size=64m',
-        '--mount', f'type=bind,src={workspace.resolve()},dst=/workspace,readonly',
-        '-w', '/workspace', TEST_IMAGE,
-        'python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider',
-    ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
-        output = (result.stdout + '\n' + result.stderr)[-16000:]
-        # pytest exit code 0 means tests collected and passed; output text is not a trust signal.
-        passed = result.returncode == 0
-        status = 'tested' if passed else 'test_failed'
-    except FileNotFoundError:
-        output, passed, status = 'Docker is not installed or not on PATH', False, 'test_failed'
-    except subprocess.TimeoutExpired:
-        output, passed, status = 'Docker tests timed out after 120 seconds', False, 'test_failed'
+        spec = select_runner(workspace)
+    except UnsupportedRunner as exc:
+        raise WorkspaceError(str(exc)) from exc
+    plan_data = row['plan']
+    plan = Plan(tuple(plan_data.get('requirements', ())), tuple(plan_data.get('acceptance', ())))
+    approved_paths = set(row['approved_paths'])
+    baseline = self.baselines / proposal_id
+    original = {p.relative_to(baseline).as_posix(): p.read_bytes() for p in baseline.rglob('*') if p.is_file() and not p.is_symlink()}
     with self._db() as db:
-        db.execute('UPDATE workspace_proposals SET status=?, test_output=? WHERE id=?', (status, output, proposal_id))
+        db.execute("UPDATE workspace_proposals SET status='running',tested_digest='' WHERE id=?", (proposal_id,))
+    output = ''
+    for attempt in range(1, WorkflowPolicy().max_attempts + 1):
+        self._stage(proposal_id, 'testing')
+        before_test = tree_digest(workspace)
+        passed, output = execute_runner(workspace, spec)
+        if tree_digest(workspace) != before_test:
+            passed = False
+            output = 'Workspace changed during testing; verification invalidated' 
+        with self._db() as db:
+            db.execute('UPDATE workspace_proposals SET attempts=?,test_output=? WHERE id=?', (attempt, output, proposal_id))
+        if passed:
+            with self._db() as db:
+                db.execute("UPDATE workspace_proposals SET status='tested',tested_digest=? WHERE id=?", (before_test, proposal_id))
+            self._stage(proposal_id, 'verified')
+            return self.get(proposal_id)
+        # Only a real test failure may be repaired; infrastructure failures are
+        # terminal and should never be passed to the LLM as code feedback.
+        if attempt >= WorkflowPolicy().max_attempts or not plan.acceptance or not re.match(r'^Runner: [^\n]+ \(exit [1-9][0-9]*; test_result\)', output):
+            break
+        # Refuse to repair if approved originals have changed in the real project.
+        for path in approved_paths:
+            current = _checked_target(project.path, path)
+            if not current.is_file() or digest(current.read_bytes()) != digest(original.get(path)):
+                output += '\nApproved source changed since proposal; restart with fresh context'
+                break
+        else:
+            current = None
+        if current is not None:
+            break
+        try:
+            from dotenv import load_dotenv
+            from multi_agent_software_team.llm.gemini import GeminiClient
+            load_dotenv()
+            engine = UnifiedEngine(GeminiClient())
+        except Exception as exc:
+            output += '\nRepair unavailable: ' + str(exc)[:300]
+            break
+        approved = '\n\n'.join(f'FILE: {p}\n{original[p].decode("utf-8")}' for p in sorted(approved_paths))
+        prompt = build_workspace_prompt(row['task'], '\n'.join(sorted(original))[:12000],
+                                        approved, detect_languages(original))
+        previous_patch = []
+        for change in self.get(proposal_id)['changes']:
+            path = change['path']
+            if change['action'] != 'create' and path not in approved_paths:
+                continue
+            previous_patch.append({'path': path, 'action': change['action'], 'content': '' if change['action'] == 'delete' else (workspace / safe_path(path)).read_text(encoding='utf-8')})
+        prompt += '\nPrevious generated patch (replace with complete corrected operations):\n' + json.dumps(previous_patch, ensure_ascii=False)
+        self._stage(proposal_id, 'developer_repair')
+        try:
+            operations = _reviewed_patch(engine, row['task'], prompt, plan, original, approved_paths,
+                lambda ops: validate_operations(ops, original, approved_paths),
+                lambda stage: self._stage(proposal_id, stage), feedback=output)
+        except Exception as exc:
+            output += '\nRepair failed: ' + str(exc)[:500]
+            break
+        changes = self._write_operations(proposal_id, operations, original)
+        self._update(proposal_id, 'running', changes=changes)
+        try:
+            spec = select_runner(workspace)
+        except UnsupportedRunner as exc:
+            output += '\n' + str(exc)
+            break
+    with self._db() as db:
+        db.execute("UPDATE workspace_proposals SET status='test_failed',test_output=? WHERE id=?", (output, proposal_id))
+    self._stage(proposal_id, 'test_failed')
     return self.get(proposal_id)
-
 
 def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str, allow_existing: bool = False) -> dict:
     with _APPLY_LOCK:
@@ -382,6 +492,8 @@ def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str,
         root = project.path
         workspace = self.root / proposal_id
         changes = row['changes']
+        if not row['tested_digest'] or tree_digest(workspace) != row['tested_digest']:
+            raise WorkspaceError('Isolated workspace changed after testing; retest before applying')
         if not changes:
             raise WorkspaceError('No changes to apply')
         prepared = []

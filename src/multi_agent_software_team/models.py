@@ -37,6 +37,8 @@ class ExecutionAttempt:
 @dataclass
 class Mission:
     description: str
+    language: str = "Python"
+    test_framework: str | None = None
     status: MissionStatus = MissionStatus.PENDING
     requirements: list[str] = field(default_factory=list)
     code: str = ""

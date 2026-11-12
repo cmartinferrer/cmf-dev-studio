@@ -31,8 +31,8 @@ export default function RepositoryInsights({ projectId, approved, onApprove, onG
     {error && <div role="alert" className="alert">{error}</div>}
     {insights && <>
       <div className="insights-stats"><div><strong>Detected technologies</strong><p>{insights.technologies.join(' · ') || 'No known manifests detected'}</p></div><div><strong>Source extensions</strong><p>{Object.entries(insights.languages).map(([ext, count]) => `${ext}: ${count}`).join(' · ') || 'None'}</p></div></div>
-      <h3>Choose reference files ({selected.length}/{insights.limits.max_files})</h3>
-      <p className="mission-muted">Only approved files are sent to Gemini when you start a mission. Hidden files, configuration files and large files are excluded. Review their contents first; automatic secret detection is not a guarantee.</p>
+      <h3>Choose reference files ({selected.length}/{insights.candidates.length} available · max {insights.limits.max_files})</h3>
+      <p className="mission-muted">Only approved files are sent to Gemini when you start a mission. Hidden and sensitive files are excluded; supported build manifests are selectable. Review their contents first; automatic secret detection is not a guarantee.</p>
       {insights.truncated && <p className="mission-muted">Inventory limit reached. Some files may not appear.</p>}
       <div className="insights-files">{insights.candidates.map(file => <label key={file.path}><input type="checkbox" checked={selected.includes(file.path)} disabled={!selected.includes(file.path) && selected.length >= 8} onChange={() => toggle(file.path)}/><span>{file.path}</span><small>{file.size} B</small></label>)}</div>
       <div className="insights-actions"><button className="secondary" disabled={!selected.length} onClick={() => void review()}>Review selected content</button>{preview && <button className="primary" onClick={() => { onApprove(selected, preview.digest); onGoToMissions(); }}>Approve {preview.files.length} files & go to missions</button>}{preview && <button className="secondary" onClick={() => { onApprove(selected, preview.digest); onGoToProposals(); }}>Approve & go to proposals</button>}</div>

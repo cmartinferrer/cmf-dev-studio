@@ -58,11 +58,18 @@ class GeminiClient:
         Raises:
             ValueError: If Gemini returns an empty text response.
         """
+        return self._generate(prompt)
+
+    def generate_json(self, prompt: str, schema: dict) -> str:
+        return self._generate(prompt, config={"response_mime_type": "application/json", "response_json_schema": schema})
+
+    def _generate(self, prompt: str, **kwargs) -> str:
         for attempt in range(self.max_provider_attempts):
             try:
                 response = self._client.models.generate_content(
                     model=self.model,
                     contents=prompt,
+                    **kwargs,
                 )
                 break
             except Exception as exc:

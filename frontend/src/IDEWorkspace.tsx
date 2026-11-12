@@ -26,7 +26,7 @@ import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Termina
 
 type Tab = { path: string; content: string; saved: string; sha256: string | null; dirty: boolean; isNew: boolean };
 type Props = { project: Project; approved: string[]; digest: string | null; onApprove: (paths:string[],digest:string | null)=>void };
-function language(path: string) { const ext=path.split('.').pop()?.toLowerCase(); return ({py:'python',ts:'typescript',tsx:'typescript',js:'javascript',jsx:'javascript',json:'json',md:'markdown',yaml:'yaml',yml:'yaml',toml:'ini',html:'html',css:'css'} as Record<string,string>)[ext||''] || 'plaintext'; }
+function language(path: string) { const ext=path.split('.').pop()?.toLowerCase(); return ({py:'python',ts:'typescript',tsx:'typescript',js:'javascript',jsx:'javascript',json:'json',md:'markdown',yaml:'yaml',yml:'yaml',toml:'ini',java:'java',kt:'kotlin',kts:'kotlin',xml:'xml',gradle:'groovy',html:'html',css:'css'} as Record<string,string>)[ext||''] || 'plaintext'; }
 function FolderTree({projectId, path='', depth=0, onOpen, revision}:{projectId:string;path?:string;depth?:number;onOpen:(path:string)=>void;revision:number}) {
   const [expanded,setExpanded]=useState(depth===0);
   const [items,setItems]=useState<FileEntry[]>([]);
@@ -108,7 +108,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
     </section>
     {assistantVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize AI panel" onPointerDown={e=>startResize(e,"assistant")}/>}
     {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant <button className="ide-advanced-toggle" onClick={()=>setShowAdvanced(v=>!v)} title="More AI tools"><SlidersHorizontal size={14}/></button></div>{showAdvanced&&<div className="ide-ai-switch ide-ai-switch-v32"><button className={side==='assistant'?'on':''} onClick={()=>setSide('assistant')}>Assistant</button><button className={side==='context'?'on':''} onClick={()=>setSide('context')}>Context</button><button className={side==='missions'?'on':''} onClick={()=>setSide('missions')}>History</button></div>}
-      <div className="ide-ai-content">{side==='assistant'?<AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} contextDigest={digest} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)} onContext={()=>{setSide('context');setShowAdvanced(true);}}/>:side==='context'?<RepositoryInsights projectId={project.id} approved={approved} onApprove={onApprove} onGoToMissions={()=>setSide('missions')} onGoToProposals={()=>setSide('assistant')}/>:<MissionWorkspace projectId={project.id} contextPaths={approved} contextDigest={digest}/>}</div>
+      <div className="ide-ai-content">{side==='assistant'?<AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} contextDigest={digest} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)} onContext={()=>{setSide('context');setShowAdvanced(true);}} onApproveContext={onApprove}/>:side==='context'?<RepositoryInsights projectId={project.id} approved={approved} onApprove={onApprove} onGoToMissions={()=>setSide('missions')} onGoToProposals={()=>setSide('assistant')}/>:<MissionWorkspace projectId={project.id} contextPaths={approved} contextDigest={digest}/>}</div>
     </aside>}
   </div>;
 }

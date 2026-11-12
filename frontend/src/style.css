@@ -96,3 +96,12 @@
 .chat-modal label{display:flex;align-items:center;gap:8px;font-size:11px}.chat-modal-actions{display:flex;justify-content:flex-end;gap:10px}.chat-modal-actions>button:first-child{background:transparent;border:1px solid #465879;border-radius:7px;color:#d6e2f4;padding:9px 12px;cursor:pointer}
 .chat-spin{animation:chat-spin 1s linear infinite}@keyframes chat-spin{to{transform:rotate(360deg)}}
 .studio-xterm{position:relative;padding:5px 10px}.studio-xterm-surface{flex:1;min-height:0;overflow:hidden}.studio-xterm-surface .xterm{height:100%}.studio-xterm-hint{font-size:10px;color:#9cb0cb;padding:3px}
+
+/* v4: repository permissions stay in the chat instead of requiring navigation */
+.chat-context-inline{padding:12px;border-bottom:1px solid var(--border,#444);max-height:42vh;overflow:auto;font-size:12px}
+.chat-context-inline p{opacity:.7;margin:6px 0}
+.chat-context-files{max-height:170px;overflow:auto;display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.chat-context-files label{display:flex;gap:8px;align-items:center;word-break:break-word}
+.chat-context-actions{display:flex;gap:8px;margin-top:8px}
+.chat-context-inline pre{white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto}
+.chat-acceptance{font-size:12px;margin:8px 0;opacity:.9}
