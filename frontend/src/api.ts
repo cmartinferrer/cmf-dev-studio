@@ -14,14 +14,6 @@ export const listProjects = () => request<Project[]>('/projects');
 export const createProject = (name: string, description: string) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description }) });
 export const registerProject = (path: string, name: string, description: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path, name: name || null, description }) });
 
-export type MissionStatus = 'queued' | 'running' | 'completed' | 'failed';
-export type MissionResult = { requirements: string[] | string; code: string; tests: string; feedback: string; attempts: number; history: unknown[] };
-export type MissionRun = { id: string; project_id: string; description: string; status: MissionStatus; created_at: string; updated_at: string; result: MissionResult | null; error: string };
-export type MissionEvent = { id: number; occurred_at: string; type: string; agent: string | null; attempt: number | null; max_attempts: number | null; status: string | null; passed: number | null; failed: number | null; message: string };
-export const listMissions = (projectId: string) => request<MissionRun[]>(`/projects/${encodeURIComponent(projectId)}/missions`);
-export const startMission = (projectId: string, description: string, contextPaths: string[] = [], contextDigest: string | null = null) => request<MissionRun>(`/projects/${encodeURIComponent(projectId)}/missions`, { method: 'POST', body: JSON.stringify({ description, context_paths: contextPaths, context_digest: contextDigest }) });
-export const getMission = (runId: string) => request<MissionRun>(`/missions/${encodeURIComponent(runId)}`);
-export const listMissionEvents = (runId: string) => request<MissionEvent[]>(`/missions/${encodeURIComponent(runId)}/events`);
 
 export type FileEntry = { name: string; path: string; kind: 'file' | 'directory' };
 export type DirectoryListing = { path: string; entries: FileEntry[]; truncated: boolean };

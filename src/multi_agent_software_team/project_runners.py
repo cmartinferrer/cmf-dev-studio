@@ -40,6 +40,14 @@ def select_runner(workspace: Path) -> RunnerSpec:
 
 
 def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
+    setup = ''
+    if spec.name == 'maven':
+        setup = 'export JAVA_TOOL_OPTIONS=-Duser.home=/tmp; mkdir -p /tmp/maven && cp -R /home/runner/.m2/repository /tmp/maven/ || exit 125; '
+    elif spec.name == 'gradle':
+        setup = 'export JAVA_TOOL_OPTIONS=-Duser.home=/tmp; mkdir -p /tmp/gradle && cp -R /home/runner/.gradle/caches /tmp/gradle/ || exit 125; export GRADLE_USER_HOME=/tmp/gradle; '
+    args = spec.command
+    if spec.name == 'maven':
+        args = (*args, '-Dmaven.repo.local=/tmp/maven/repository')
     command = [
         'docker', 'run', '--rm',
         '--network', 'none',
@@ -50,7 +58,7 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
         '--memory', '1g',
         '--cpus', '1',
         '--user', '10001:10001',
-        '--tmpfs', '/tmp:rw,nosuid,mode=1777,size=128m',
+        '--tmpfs', '/tmp:rw,nosuid,mode=1777,size=' + ('768m' if spec.name in ('maven', 'gradle') else '128m'),
         '--mount',
         f'type=bind,src={workspace.resolve()},dst=/workspace,readonly',
         '-w', '/tmp',
@@ -59,9 +67,9 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
         'workdir=$(mktemp -d /tmp/studio-XXXXXX) || exit 125; '
         'cp -R /workspace/. "$workdir/" || exit 125; '
         'cd "$workdir" || exit 125; '
-        'exec "$@"',
+        + setup + 'exec "$@"',
         'studio-runner',
-        *spec.command,
+        *args,
     ]
 
     try:
@@ -79,7 +87,7 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
             'infrastructure_error'
             if result.returncode in (125, 126, 127)
             or (spec.name == 'pytest' and result.returncode in (3, 4))
-            or any(marker in output for marker in ('Could not resolve dependencies for project', 'No cached version', 'Cannot access central', 'Could not resolve all files for configuration'))
+            or any(marker in output for marker in ('Could not resolve dependencies for project', 'No cached version', 'Cannot access central', 'Could not resolve all files for configuration', 'PluginResolutionException', 'has not been downloaded from it before', 'No cached version available'))
             else 'test_result'
         )
 

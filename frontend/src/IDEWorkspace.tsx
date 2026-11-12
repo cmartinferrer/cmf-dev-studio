@@ -20,7 +20,6 @@ import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode, Folder, FolderOp
 import { deleteEditableFile, listProjectFiles, openEditableFile, saveEditableFile, previewProposalFile, type FileEntry, type Project, type ProposalChange } from './api';
 import AIChat from './AIChat';
 import RepositoryInsights from './RepositoryInsights';
-import MissionWorkspace from './MissionWorkspace';
 import TerminalPanel from './TerminalPanel';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare, SlidersHorizontal } from 'lucide-react';
 
@@ -37,7 +36,7 @@ function FolderTree({projectId, path='', depth=0, onOpen, revision}:{projectId:s
 export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
   const [tabs,setTabs]=useState<Tab[]>([]);
   const [active,setActive]=useState<string|null>(null);
-  const [side,setSide]=useState<'assistant'|'context'|'missions'>('assistant');
+  const [side,setSide]=useState<'assistant'|'context'>('assistant');
   const [revision,setRevision]=useState(0);
   const [error,setError]=useState('');
   const [message,setMessage]=useState('');
@@ -107,8 +106,8 @@ export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
       {bottom&&<><div className="ide-resize-horizontal" role="separator" aria-label="Resize terminal" onPointerDown={e=>startResize(e,"terminal")}/><div className="ide-terminal-panel" style={{height:terminalHeight}}><div className="ide-terminal-header"><strong>TERMINAL</strong><button onClick={()=>setBottom(false)} title="Close terminal"><X size={14}/></button></div><TerminalPanel key={project.id} projectId={project.id}/></div></>}
     </section>
     {assistantVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize AI panel" onPointerDown={e=>startResize(e,"assistant")}/>}
-    {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant <button className="ide-advanced-toggle" onClick={()=>setShowAdvanced(v=>!v)} title="More AI tools"><SlidersHorizontal size={14}/></button></div>{showAdvanced&&<div className="ide-ai-switch ide-ai-switch-v32"><button className={side==='assistant'?'on':''} onClick={()=>setSide('assistant')}>Assistant</button><button className={side==='context'?'on':''} onClick={()=>setSide('context')}>Context</button><button className={side==='missions'?'on':''} onClick={()=>setSide('missions')}>History</button></div>}
-      <div className="ide-ai-content">{side==='assistant'?<AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} contextDigest={digest} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)} onContext={()=>{setSide('context');setShowAdvanced(true);}} onApproveContext={onApprove}/>:side==='context'?<RepositoryInsights projectId={project.id} approved={approved} onApprove={onApprove} onGoToMissions={()=>setSide('missions')} onGoToProposals={()=>setSide('assistant')}/>:<MissionWorkspace projectId={project.id} contextPaths={approved} contextDigest={digest}/>}</div>
+    {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant <button className="ide-advanced-toggle" onClick={()=>setShowAdvanced(v=>!v)} title="More AI tools"><SlidersHorizontal size={14}/></button></div>{showAdvanced&&<div className="ide-ai-switch ide-ai-switch-v32"><button className={side==='assistant'?'on':''} onClick={()=>setSide('assistant')}>Assistant</button><button className={side==='context'?'on':''} onClick={()=>setSide('context')}>Context</button></div>}
+      <div className="ide-ai-content">{side==='assistant'?<AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} contextDigest={digest} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)} onContext={()=>{setSide('context');setShowAdvanced(true);}} onApproveContext={onApprove}/>:<RepositoryInsights projectId={project.id} approved={approved} onApprove={onApprove} onGoToProposals={()=>setSide('assistant')}/>}</div>
     </aside>}
   </div>;
 }

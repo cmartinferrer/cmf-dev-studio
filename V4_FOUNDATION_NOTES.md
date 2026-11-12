@@ -1,3 +1,5 @@
+> Historical record: superseded by the single-orchestrator architecture in README.md.
+
 # v4 — Unified Orchestration Foundation (incremental preview)
 
 This is **not yet a fully unified multi-language agent engine**. It introduces shared workflow contracts while preserving the existing mission and workspace flows to avoid breaking the IDE.

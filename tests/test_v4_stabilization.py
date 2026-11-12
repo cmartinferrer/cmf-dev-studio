@@ -1,8 +1,8 @@
 import json
 from unittest.mock import Mock
 import pytest
-from multi_agent_software_team.unified_engine import UnifiedEngine, Plan
-from multi_agent_software_team.workspaces import validate_operations, WorkspaceError, _reviewed_patch
+from multi_agent_software_team.orchestrator import Orchestrator, Plan
+from multi_agent_software_team.workspaces import validate_operations, WorkspaceError
 
 
 def test_invalid_python_is_rejected_before_execution():
@@ -14,7 +14,7 @@ def test_review_only_receives_approved_baseline_and_diff():
     llm = Mock(); llm.generate.return_value = '{"issues": []}'
     original = {'tests/test_main.py': b'def test_version():\n    assert version == "0.1.0"\n', 'private.py': b'PRIVATE_SENTINEL'}
     operations = [{'action':'modify','path':'tests/test_main.py','content':original['tests/test_main.py'].decode()+'\ndef test_greeting():\n    assert True\n'}]
-    assert UnifiedEngine(llm).review_patch('greeting', Plan(('greeting',), ('greeting',)), operations, original=original, approved_paths={'tests/test_main.py'}) == []
+    assert Orchestrator(llm).review_patch('greeting', Plan(('greeting',), ('greeting',)), operations, original=original, approved_paths={'tests/test_main.py'}) == []
     prompt = llm.generate.call_args.args[0]
     assert 'PRIVATE_SENTINEL' not in prompt
     assert '0.1.0' in prompt and 'Preserve unchanged pre-existing tests' in prompt
@@ -22,23 +22,23 @@ def test_review_only_receives_approved_baseline_and_diff():
 
 
 def test_review_feedback_retries_and_requires_clean_review():
-    engine = Mock(); operations = [{'action':'create','path':'app.py','content':'x=1'}]
+    engine = Orchestrator(Mock()); engine.generate_patch = Mock(); engine.review_patch = Mock(); operations = [{'action':'create','path':'app.py','content':'x=1'}]
     engine.generate_patch.return_value = operations
     engine.review_patch.side_effect = [['fix assertion'], []]
-    assert _reviewed_patch(engine,'task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock()) == operations
+    assert engine.reviewed_patch('task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock()) == operations
     assert 'fix assertion' in engine.generate_patch.call_args.kwargs['feedback']
     assert engine.review_patch.call_count == 2
 
 
 def test_persistent_review_failure_never_returns_patch():
-    engine = Mock(); engine.review_patch.return_value = ['missing tests']
-    with pytest.raises(WorkspaceError, match='Tester review unresolved'):
-        _reviewed_patch(engine,'task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock())
+    engine = Orchestrator(Mock()); engine.generate_patch = Mock(); engine.review_patch = Mock(); engine.review_patch.return_value = ['missing tests']
+    with pytest.raises(ValueError, match='Tester review unresolved'):
+        engine.reviewed_patch('task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock())
 
 
 def test_syntax_error_is_repaired_in_generation():
     llm = Mock(); llm.generate.side_effect = [json.dumps({'operations':[{'action':'create','path':'app.py','content':'def broken name(): pass'}]}),json.dumps({'operations':[{'action':'create','path':'app.py','content':'def fixed(): pass'}]})]
-    result = UnifiedEngine(llm).generate_patch('prompt',Plan(('task',),('criterion',)),validate=lambda ops: validate_operations(ops,{},set()))
+    result = Orchestrator(llm).generate_patch('prompt',Plan(('task',),('criterion',)),validate=lambda ops: validate_operations(ops,{},set()))
     assert result[0]['content'] == 'def fixed(): pass'
     assert 'Syntax error' in llm.generate.call_args.args[0]
 

@@ -1,3 +1,5 @@
+> Historical record: superseded by the single-orchestrator architecture in README.md.
+
 # V4 stabilization — 2026-11-12
 
 Based on the user's uncommitted ZIP 20261112-064636. Preserves the working Docker mktemp and TypeScript fixes. No files need to be deleted.

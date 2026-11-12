@@ -1,3 +1,5 @@
+> Historical record: superseded by the single-orchestrator architecture in README.md.
+
 # Multi-Agent Studio v4 — unified engine integration report
 
 ## Architecture

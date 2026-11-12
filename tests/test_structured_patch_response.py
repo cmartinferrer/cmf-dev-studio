@@ -1,7 +1,8 @@
 import json
 from unittest.mock import Mock
 import pytest
-from multi_agent_software_team.unified_engine import UnifiedEngine, Plan, PATCH_SCHEMA
+from multi_agent_software_team.orchestrator import Orchestrator, Plan
+from multi_agent_software_team.contracts import PATCH_SCHEMA
 from multi_agent_software_team.workspaces import validate_operations
 
 class StructuredProvider:
@@ -12,7 +13,7 @@ class StructuredProvider:
 
 def test_repair_retries_array_and_syntax_error_using_schema():
     provider = StructuredProvider()
-    result = UnifiedEngine(provider).generate_patch('task', Plan(('task',), ('criterion',)), feedback='SyntaxError', validate=lambda ops: validate_operations(ops, {}, set()))
+    result = Orchestrator(provider).generate_patch('task', Plan(('task',), ('criterion',)), feedback='SyntaxError', validate=lambda ops: validate_operations(ops, {}, set()))
     assert result[0]['content'] == 'def fixed(): pass'
     assert provider.generate_json.call_count == 3
     assert all(c.args[1] == PATCH_SCHEMA for c in provider.generate_json.call_args_list)

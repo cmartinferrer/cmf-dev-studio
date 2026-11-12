@@ -16,16 +16,6 @@ def test_real_secret_reports_line_without_value(tmp_path: Path):
     assert 'actualSensitiveValue123' not in str(exc.value)
 
 
-def test_reference_data_not_mounted_instruction():
-    from multi_agent_software_team.agents.developer import DeveloperAgent
-    from multi_agent_software_team.models import Mission
-    from unittest.mock import Mock
-    llm = Mock()
-    llm.generate.return_value = 'def f(): return 1'
-    mission = Mission(description='Summarize approved repository context')
-    mission.requirements = ['summarize']
-    DeveloperAgent(llm).execute(mission)
-    assert 'NOT mounted' in llm.generate.call_args.args[0]
 
 
 def test_gemini_retries_transient_errors(monkeypatch):

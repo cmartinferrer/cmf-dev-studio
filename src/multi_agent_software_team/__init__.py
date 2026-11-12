@@ -1,8 +1,6 @@
-"""Multi-agent software team package."""
-
+"""Multi-Agent Studio."""
 
 def main() -> int:
-    """Launch the command-line application."""
-    from multi_agent_software_team.cli import main as cli_main
-
-    return cli_main()
+    import uvicorn
+    uvicorn.run("multi_agent_software_team.api.app:app", host="127.0.0.1", port=8000)
+    return 0

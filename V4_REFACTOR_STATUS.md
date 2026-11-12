@@ -1,3 +1,5 @@
+> Historical record: superseded by the single-orchestrator architecture in README.md.
+
 # Unified engine refactor — verification status
 
 ## Implemented

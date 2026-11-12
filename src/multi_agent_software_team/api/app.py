@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from multi_agent_software_team.projects import Project, ProjectManager
 from multi_agent_software_team.projects.explorer import ExplorerError, list_directory, read_file
-from multi_agent_software_team.missions import MissionService
 from multi_agent_software_team.workspaces import WorkspaceService, WorkspaceError
 from multi_agent_software_team.projects.browser import FolderBrowserError, browse_directory
 from multi_agent_software_team.projects.search import search_files
@@ -59,9 +58,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     if data_dir is None:
         data_dir = os.environ.get("STUDIO_DATA_DIR", ".studio-data")
     manager = ProjectManager(data_dir)
-    missions = MissionService(manager)
     workspaces = WorkspaceService(manager)
-    missions.recover_interrupted()
     app = FastAPI(title="Multi-Agent Studio API", version="0.1.0")
 
     @app.websocket("/api/projects/{project_id}/terminal")
@@ -203,42 +200,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             return prepare_context(project.path, request.paths)
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    class MissionRequest(BaseModel):
-        description: str = Field(min_length=1, max_length=10000)
-        context_paths: list[str] = Field(default_factory=list, max_length=8)
-        context_digest: str | None = None
-
-    @app.post("/api/projects/{project_id}/missions", status_code=status.HTTP_202_ACCEPTED)
-    def start_mission(project_id: str, request: MissionRequest) -> dict:
-        try:
-            return missions.submit(project_id, request.description, request.context_paths, request.context_digest)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except (ValueError, ExplorerError, OSError) as exc:
-            code = 409 if "already active" in str(exc) else 422
-            raise HTTPException(status_code=code, detail=str(exc)) from exc
-
-    @app.get("/api/projects/{project_id}/missions")
-    def list_missions(project_id: str) -> list[dict]:
-        if manager.get(project_id) is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        return missions.list_for_project(project_id)
-
-    @app.get("/api/missions/{run_id}")
-    def get_mission(run_id: str) -> dict:
-        run = missions.get(run_id)
-        if run is None:
-            raise HTTPException(status_code=404, detail="Mission not found")
-        return run
-
-    @app.get("/api/missions/{run_id}/events")
-    def get_mission_events(run_id: str, after_id: int = 0) -> list[dict]:
-        if missions.get(run_id) is None:
-            raise HTTPException(status_code=404, detail="Mission not found")
-        if after_id < 0:
-            raise HTTPException(status_code=422, detail="after_id must be non-negative")
-        return missions.events(run_id, after_id)
 
     class ProposalRequest(BaseModel):
         task: str = Field(min_length=1, max_length=4000)

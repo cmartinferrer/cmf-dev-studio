@@ -66,16 +66,3 @@ def test_digest_changes_when_file_changes(tmp_path: Path):
     assert before != prepare_context(tmp_path, ['main.py'])['digest']
 
 
-def test_mission_rejects_unapproved_context(tmp_path: Path):
-    from multi_agent_software_team.projects.manager import ProjectManager
-    from multi_agent_software_team.missions import MissionService
-    root = tmp_path / 'repo'
-    root.mkdir()
-    (root / 'main.py').write_text('x = 1')
-    manager = ProjectManager(tmp_path / 'data')
-    project = manager.register_existing(root)
-    service = MissionService(manager)
-    with pytest.raises(ValueError, match='not approved'):
-        service.submit(project.id, 'Do something', ['main.py'])
-    with pytest.raises(ValueError, match='not approved'):
-        service.submit(project.id, 'Do something', ['main.py'], 'bad-digest')

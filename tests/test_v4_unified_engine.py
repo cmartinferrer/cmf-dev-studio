@@ -7,28 +7,11 @@ import pytest
 
 from multi_agent_software_team.agents.developer import DeveloperAgent
 from multi_agent_software_team.agents.tester import TesterAgent as QAAgent
-from multi_agent_software_team.models import Mission
 from multi_agent_software_team.project_runners import select_runner, UnsupportedRunner
-from multi_agent_software_team.unified_engine import UnifiedEngine
+from multi_agent_software_team.orchestrator import Orchestrator
 from multi_agent_software_team.workspaces import validate_operations, WorkspaceError
 
 
-@pytest.mark.parametrize('language,framework', [('Python', 'pytest'), ('Java', 'JUnit 5'), ('Kotlin', 'JUnit 5')])
-def test_agents_follow_requested_language(language, framework):
-    llm = Mock()
-    llm.generate.return_value = 'sample code'
-    mission = Mission(description='Implement feature', language=language)
-    mission.requirements = ['Return a concrete result']
-    DeveloperAgent(llm).execute(mission)
-    developer_prompt = llm.generate.call_args.args[0]
-    assert language in developer_prompt
-    assert 'Return only valid Python source code' not in developer_prompt
-    QAAgent(llm).execute(mission)
-    tester_prompt = llm.generate.call_args.args[0]
-    assert language in tester_prompt
-    assert framework in tester_prompt
-    assert 'experienced Python QA engineer' not in tester_prompt
-    assert 'externally observable' in tester_prompt
 
 
 def test_unified_engine_roles_and_permission_validation():
@@ -39,7 +22,7 @@ def test_unified_engine_roles_and_permission_validation():
     ]
     llm = Mock()
     llm.generate.side_effect = responses
-    engine = UnifiedEngine(llm)
+    engine = Orchestrator(llm)
     plan = engine.plan_patch('Add version endpoint', 'src/Main.java', 'FILE: src/Main.java\nclass Main {}', ['Java'])
     original = {'src/Main.java': b'class Main {}'}
     operations = engine.generate_patch('Return JSON operations', plan,

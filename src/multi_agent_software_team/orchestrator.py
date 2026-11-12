@@ -1,72 +1,65 @@
-"""Sequential orchestration with optional test validation and retries."""
-
+"""Single repository orchestrator: plan, develop, review, verify and repair.
+WorkspaceService owns snapshots, authorization and persistence; agents own prompts.
+"""
+from __future__ import annotations
+import re
 from multi_agent_software_team.agents.analyst import AnalystAgent
-from multi_agent_software_team.agents.developer import DeveloperAgent
+from multi_agent_software_team.agents.developer import DeveloperAgent, build_workspace_prompt
 from multi_agent_software_team.agents.tester import TesterAgent
-from multi_agent_software_team.events import EventListener, EventType, ExecutionEvent
-from multi_agent_software_team.llm.client import LLMClient
-from multi_agent_software_team.models import ExecutionAttempt, Mission, MissionStatus
-from multi_agent_software_team.runner.client import TestRunner
-from multi_agent_software_team.runner.models import TestResult, TestStatus
+from multi_agent_software_team.contracts import Plan
 from multi_agent_software_team.workflow import WorkflowPolicy
 
-
 class Orchestrator:
-    """Coordinate agents and retry implementations after test failures."""
+    def __init__(self, llm, policy=None):
+        self.policy = policy or WorkflowPolicy()
+        self.analyst = AnalystAgent(llm)
+        self.developer = DeveloperAgent(llm)
+        self.tester = TesterAgent(llm)
 
-    def __init__(
-        self,
-        llm: LLMClient,
-        runner: TestRunner | None = None,
-        max_attempts: int = 3,
-        on_event: EventListener | None = None,
-    ) -> None:
-        """Initialize agents and optional validation.
+    def plan_patch(self, *args, **kwargs):
+        return self.analyst.plan_patch(*args, **kwargs)
 
-        Args:
-            llm: Language model client shared by the agents.
-            runner: Optional test runner; not enabled by default.
-            max_attempts: Maximum test executions, including the first.
+    def generate_patch(self, *args, **kwargs):
+        return self.developer.generate_patch(*args, max_attempts=self.policy.max_attempts, **kwargs)
 
-        Raises:
-            ValueError: If max_attempts is less than one.
-        """
-        if max_attempts < 1:
-            raise ValueError("max_attempts must be at least 1")
-        self.policy = WorkflowPolicy(max_attempts)
+    def review_patch(self, *args, **kwargs):
+        return self.tester.review_patch(*args, **kwargs)
 
-        self.analyst = AnalystAgent(llm=llm)
-        self.developer = DeveloperAgent(llm=llm)
-        self.tester = TesterAgent(llm=llm)
-        self.runner = runner
-        self.max_attempts = max_attempts
-        self.on_event = on_event
+    def prepare(self, task, inventory, approved, languages, original, approved_paths, validate, stage, save_plan):
+        """Run the initial analyst/developer/tester sequence."""
+        stage("analyst")
+        plan = self.plan_patch(task, inventory, approved, languages)
+        save_plan(plan)
+        prompt = build_workspace_prompt(task, inventory, approved, languages)
+        return self.reviewed_patch(task, prompt, plan, original, approved_paths, validate, stage)
 
-    def run(self, mission: Mission) -> Mission:
-        """Compatibility API: delegate to the same engine used by IDE patches."""
-        from multi_agent_software_team.unified_engine import UnifiedEngine
-        engine = UnifiedEngine(self.analyst.llm, self.policy)
-        return engine.run_mission(mission, runner=self.runner, on_event=self.on_event,
-                                  agents=(self.analyst, self.developer, self.tester))
-
-    def _emit(self, event_type: EventType, **kwargs: object) -> None:
-        """Notify an optional observer without coupling the core to a UI."""
-        if self.on_event is not None:
-            self.on_event(ExecutionEvent(type=event_type, **kwargs))
+    def reviewed_patch(self, task, prompt, plan, original, approved_paths, validate, stage, feedback=''):
+        """Coordinate bounded Developer/Tester review; storage is supplied by caller."""
+        policy = self.policy
+        for _ in range(policy.max_attempts):
+            stage('developer_repair' if feedback else 'developer')
+            operations = self.generate_patch(prompt, plan, feedback=feedback, validate=validate)
+            stage('tester')
+            issues = self.review_patch(task, plan, operations, original=original, approved_paths=approved_paths)
+            if not issues:
+                return operations
+            feedback += '\nTester review: ' + '; '.join(issues)
+        raise ValueError('Tester review unresolved: ' + '; '.join(issues))
 
     @staticmethod
-    def _apply_test_result(mission: Mission, result: TestResult) -> None:
-        """Store runner feedback and classify mission success or failure."""
-        if result.status is TestStatus.PASSED and result.success:
-            mission.feedback = result.stdout
-            return
+    def repository_test_cycle(policy, run, repair):
+        """Single owner of repository test/repair scheduling. Callbacks own I/O.
 
-        mission.status = MissionStatus.FAILED
-        details = "\n".join(
-            part for part in (result.stdout, result.stderr) if part
-        )
-        mission.feedback = (
-            f"Test execution status: {result.status.value}\n"
-            f"Exit code: {result.exit_code}\n"
-            f"{details}"
-        ).strip()
+        run(attempt) returns (passed, output); repair(output) returns (retry, output).
+        """
+        for attempt in range(1, policy.max_attempts + 1):
+            passed, output = run(attempt)
+            if passed:
+                return True, output
+            recoverable = bool(re.match(r'^Runner: [^\n]+ \(exit [1-9][0-9]*; test_result\)', output))
+            if not policy.can_retry(attempt, recoverable=recoverable):
+                return False, output
+            retry, output = repair(output)
+            if not retry:
+                return False, output
+        raise AssertionError('Unreachable test cycle')

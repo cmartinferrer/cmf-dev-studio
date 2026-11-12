@@ -1,4 +1,4 @@
-"""Provider- and language-independent workflow contracts shared by IDE and missions.
+"""Provider- and language-independent workflow contracts for repository workflows.
 
 No code execution or repository writes occur in this module.
 """

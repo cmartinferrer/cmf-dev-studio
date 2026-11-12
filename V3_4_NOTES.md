@@ -1,3 +1,5 @@
+> Historical record: superseded by the single-orchestrator architecture in README.md.
+
 # v3.4 — Workspace orchestration hardening (preview)
 
 ## Changes
