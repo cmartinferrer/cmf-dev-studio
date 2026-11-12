@@ -1,0 +1,138 @@
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --locked --python ${{ matrix.python-version }}
+
+      - name: Run unit tests
+        run: uv run --locked pytest -q -m "not integration"
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+  integration:
+    name: Docker Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked --python 3.12
+
+      - name: Resolve project version
+        id: version
+        run: |
+          VERSION=$(uv run --locked python -c "from importlib.metadata import version; print(version('cmf-dev-studio'))")
+          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build Python runner
+        run: |
+          docker build \
+            -f docker/project-test-runner.Dockerfile \
+            -t cmf-dev-studio-runner-python:${{ steps.version.outputs.value }} .
+
+      - name: Build Maven runner
+        run: |
+          docker build \
+            -f docker/maven-test-runner.Dockerfile \
+            -t cmf-dev-studio-runner-maven:${{ steps.version.outputs.value }} .
+
+      - name: Build Gradle runner
+        run: |
+          docker build \
+            -f docker/gradle-test-runner.Dockerfile \
+            -t cmf-dev-studio-runner-gradle:${{ steps.version.outputs.value }} .
+
+      - name: Run integration tests
+        run: uv run --locked pytest -q -m integration
+
+  security:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan repository with Gitleaks
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/repo:ro" \
+            ghcr.io/gitleaks/gitleaks:latest \
+            git /repo \
+            --log-opts="--all" \
+            --gitleaks-ignore-path=/repo/.gitleaksignore \
+            --redact
