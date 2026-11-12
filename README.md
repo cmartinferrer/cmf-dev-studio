@@ -4,7 +4,7 @@
 
 CMF Dev Studio is an open-source, local-first, browser-based development environment that combines an integrated code editor, a multi-agent AI assistant and isolated automated testing. It helps developers evolve existing repositories or create new projects while retaining control over the files shared with AI and the changes applied to their code.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.4.1-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-18-61DAFB) ![Docker](https://img.shields.io/badge/testing-Docker-2496ED)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-18-61DAFB) ![Docker](https://img.shields.io/badge/testing-Docker-2496ED)
 
 > **Development status:** Alpha. The Python, Java and Kotlin reference workflows have been validated end to end. The project is actively evolving; review the current limitations before using it with important repositories.
 
@@ -169,9 +169,9 @@ cd ..
 Run from the repository root. The initial image builds require Internet access to fetch dependencies.
 
 ```bash
-docker build -f docker/project-test-runner.Dockerfile -t cmf-dev-studio-runner-python:0.4.1 .
-docker build -f docker/maven-test-runner.Dockerfile -t cmf-dev-studio-runner-maven:0.4.1 .
-docker build -f docker/gradle-test-runner.Dockerfile -t cmf-dev-studio-runner-gradle:0.4.1 .
+docker build -f docker/project-test-runner.Dockerfile -t cmf-dev-studio-runner-python:0.1.0 .
+docker build -f docker/maven-test-runner.Dockerfile -t cmf-dev-studio-runner-maven:0.1.0 .
+docker build -f docker/gradle-test-runner.Dockerfile -t cmf-dev-studio-runner-gradle:0.1.0 .
 ```
 
 ### Run the application

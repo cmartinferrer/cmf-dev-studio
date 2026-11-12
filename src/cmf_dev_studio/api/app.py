@@ -56,7 +56,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         data_dir = os.environ.get("STUDIO_DATA_DIR", ".studio-data")
     manager = ProjectManager(data_dir)
     workspaces = WorkspaceService(manager)
-    app = FastAPI(title="CMF Dev Studio API", version="0.4.1")
+    app = FastAPI(title="CMF Dev Studio API", version="0.1.0")
 
     @app.websocket("/api/projects/{project_id}/terminal")
     async def project_terminal(websocket: WebSocket, project_id: str) -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "cmf-dev-studio"
-version = "0.4.1"
+version = "0.1.0"
 description = "Local-first AI-assisted development environment with multi-agent orchestration and isolated testing"
 readme = "README.md"
 license = "MIT"
