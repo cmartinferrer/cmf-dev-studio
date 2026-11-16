@@ -3,4 +3,4 @@
 from .manager import ProjectManager
 from .models import Project, ProjectKind, ProjectLanguage
 
-__all__ = ["Project", "ProjectKind", "ProjectManager", "ProjectLanguage"]
+__all__ = ["Project", "ProjectKind", "ProjectLanguage", "ProjectManager"]

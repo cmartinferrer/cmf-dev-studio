@@ -4,17 +4,31 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, status, WebSocket
-from cmf_dev_studio.api.terminal import terminal_socket
+from fastapi import FastAPI, HTTPException, WebSocket, status
 from pydantic import BaseModel, Field, StrictBool
 
+from cmf_dev_studio.api.terminal import terminal_socket
 from cmf_dev_studio.projects import Project, ProjectLanguage, ProjectManager
-from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
-from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError
 from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
-from cmf_dev_studio.projects.search import search_files
-from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict, rename_entry, delete_entry, entry_path, create_directory, move_entry, directory_path, safe_path, batch_entries, copy_entries
+from cmf_dev_studio.projects.editor import (
+    EditConflict,
+    batch_entries,
+    copy_entries,
+    create_directory,
+    delete_editable,
+    delete_entry,
+    directory_path,
+    entry_path,
+    move_entry,
+    read_editable,
+    rename_entry,
+    safe_path,
+    write_editable,
+)
+from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
 from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.projects.search import search_files
+from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 
 
 class ProjectResponse(BaseModel):
@@ -77,17 +91,33 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def list_projects() -> list[ProjectResponse]:
         return [_response(project) for project in manager.list_projects()]
 
-    @app.post("/api/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+    @app.post(
+        "/api/projects",
+        response_model=ProjectResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
     def create_project(request: CreateProjectRequest) -> ProjectResponse:
         try:
-            return _response(manager.create(request.name, request.description, language=request.language))
+            return _response(
+                manager.create(
+                    request.name, request.description, language=request.language
+                )
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    @app.post("/api/projects/register", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+    @app.post(
+        "/api/projects/register",
+        response_model=ProjectResponse,
+        status_code=status.HTTP_201_CREATED,
+    )
     def register_project(request: RegisterProjectRequest) -> ProjectResponse:
         try:
-            return _response(manager.register_existing(request.path, request.name, request.description))
+            return _response(
+                manager.register_existing(
+                    request.path, request.name, request.description
+                )
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -99,7 +129,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         return _response(project)
 
     @app.patch("/api/projects/{project_id}/language", response_model=ProjectResponse)
-    def update_project_language(project_id: str, request: UpdateProjectLanguageRequest) -> ProjectResponse:
+    def update_project_language(
+        project_id: str, request: UpdateProjectLanguageRequest
+    ) -> ProjectResponse:
         project = manager.update_language(project_id, request.language)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -109,7 +141,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         name: str = Field(min_length=1, max_length=80)
 
     @app.patch("/api/projects/{project_id}/name", response_model=ProjectResponse)
-    def rename_project(project_id: str, request: RenameProjectRequest) -> ProjectResponse:
+    def rename_project(
+        project_id: str, request: RenameProjectRequest
+    ) -> ProjectResponse:
         try:
             project = manager.rename(project_id, request.name)
         except ValueError as exc:
@@ -122,8 +156,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def delete_project(project_id: str, confirmed: bool = False) -> dict:
         if not confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
-        if any(p['status'] in ('queued', 'running', 'generating', 'repairing') for p in workspaces.list(project_id)):
-            raise HTTPException(status_code=409, detail="Wait for the active AI operation")
+        if any(
+            p["status"] in ("queued", "running", "generating", "repairing")
+            for p in workspaces.list(project_id)
+        ):
+            raise HTTPException(
+                status_code=409, detail="Wait for the active AI operation"
+            )
         try:
             deleted = manager.delete(project_id)
         except (ValueError, OSError) as exc:
@@ -186,7 +225,10 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         if project.read_only and not authorize_existing:
-            raise HTTPException(status_code=403, detail="Explicit authorization required for existing projects")
+            raise HTTPException(
+                status_code=403,
+                detail="Explicit authorization required for existing projects",
+            )
         return project
 
     @app.get("/api/projects/{project_id}/editor/file")
@@ -203,7 +245,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def editor_save(project_id: str, request: EditRequest) -> dict:
         project = editable_project(project_id, request.authorize_existing)
         try:
-            return write_editable(project.path, request.path, request.content, request.expected_sha256, create=request.create)
+            return write_editable(
+                project.path,
+                request.path,
+                request.content,
+                request.expected_sha256,
+                create=request.create,
+            )
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (ExplorerError, OSError, ValueError) as exc:
@@ -230,9 +278,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         project = editable_project(project_id, request.authorize_existing)
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (target == manager.data_dir or target in manager.data_dir.parents or manager.data_dir in target.parents):
+            if project.read_only and (
+                target == manager.data_dir
+                or target in manager.data_dir.parents
+                or manager.data_dir in target.parents
+            ):
                 raise ExplorerError("Protected Studio data")
-            return rename_entry(project.path, request.path, request.name or '')
+            return rename_entry(project.path, request.path, request.name or "")
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (ExplorerError, OSError, ValueError) as exc:
@@ -255,7 +307,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         project = editable_project(project_id, request.authorize_existing)
         try:
             if project.read_only:
-                protect_studio(safe_path(project.path, request.path, allow_missing=True))
+                protect_studio(
+                    safe_path(project.path, request.path, allow_missing=True)
+                )
             return create_directory(project.path, request.path)
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -273,7 +327,10 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                 protect_studio(destination)
             if source == destination:
                 return {"path": request.path}
-            return workspaces.move_resource(project_id, lambda: move_entry(project.path, request.path, request.parent))
+            return workspaces.move_resource(
+                project_id,
+                lambda: move_entry(project.path, request.path, request.parent),
+            )
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
@@ -286,7 +343,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (target == manager.data_dir or target in manager.data_dir.parents or manager.data_dir in target.parents):
+            if project.read_only and (
+                target == manager.data_dir
+                or target in manager.data_dir.parents
+                or manager.data_dir in target.parents
+            ):
                 raise ExplorerError("Protected Studio data")
             return delete_entry(project.path, request.path)
         except (ExplorerError, OSError, ValueError) as exc:
@@ -304,9 +365,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if request.parent is None and not request.confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
-            return workspaces.move_resource(project_id, lambda: batch_entries(
-                project.path, request.paths, request.parent,
-                protect_studio if project.read_only else lambda target: None))
+            return workspaces.move_resource(
+                project_id,
+                lambda: batch_entries(
+                    project.path,
+                    request.paths,
+                    request.parent,
+                    protect_studio if project.read_only else lambda target: None,
+                ),
+            )
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
@@ -318,9 +385,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if request.parent is None:
             raise HTTPException(status_code=422, detail="Destination required")
         try:
-            return workspaces.move_resource(project_id, lambda: copy_entries(
-                project.path, request.paths, request.parent,
-                protect_studio if project.read_only else lambda target: None))
+            return workspaces.move_resource(
+                project_id,
+                lambda: copy_entries(
+                    project.path,
+                    request.paths,
+                    request.parent,
+                    protect_studio if project.read_only else lambda target: None,
+                ),
+            )
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
@@ -351,10 +424,14 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         context_paths: list[str] = Field(default_factory=list, max_length=8)
         context_digest: str | None = None
 
-    @app.post("/api/projects/{project_id}/proposals", status_code=status.HTTP_202_ACCEPTED)
+    @app.post(
+        "/api/projects/{project_id}/proposals", status_code=status.HTTP_202_ACCEPTED
+    )
     def create_proposal(project_id: str, request: ProposalRequest) -> dict:
         try:
-            return workspaces.submit(project_id, request.task, request.context_paths, request.context_digest)
+            return workspaces.submit(
+                project_id, request.task, request.context_paths, request.context_digest
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, ValueError, OSError) as exc:
@@ -424,7 +501,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/proposals/{proposal_id}/generation-decision")
     def generation_decision(proposal_id: str, request: GenerationDecision) -> dict:
         try:
-            return workspaces.retry_generation(proposal_id, request.retry, request.context_paths, request.context_digest)
+            return workspaces.retry_generation(
+                proposal_id,
+                request.retry,
+                request.context_paths,
+                request.context_digest,
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (ValueError, OSError) as exc:
@@ -445,7 +527,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/proposals/{proposal_id}/apply")
     def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
         try:
-            return workspaces.apply(proposal_id, request.approved, request.allow_existing)
+            return workspaces.apply(
+                proposal_id, request.approved, request.allow_existing
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:

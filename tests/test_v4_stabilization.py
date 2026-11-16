@@ -1,93 +1,232 @@
 import json
 from unittest.mock import Mock
+
 import pytest
+
 from cmf_dev_studio.orchestrator import Orchestrator, Plan
-from cmf_dev_studio.workspaces import validate_operations, WorkspaceError
+from cmf_dev_studio.workspaces import WorkspaceError, validate_operations
 
 
 def test_invalid_python_is_rejected_before_execution():
-    with pytest.raises(WorkspaceError, match='Syntax error in tests/test_main.py:1'):
-        validate_operations([{'action':'create','path':'tests/test_main.py','content':'def test_ greeting_default():\n    pass'}], {}, set())
+    with pytest.raises(WorkspaceError, match="Syntax error in tests/test_main.py:1"):
+        validate_operations(
+            [
+                {
+                    "action": "create",
+                    "path": "tests/test_main.py",
+                    "content": "def test_ greeting_default():\n    pass",
+                }
+            ],
+            {},
+            set(),
+        )
 
 
 def test_review_only_receives_approved_baseline_and_diff():
-    llm = Mock(); llm.generate.return_value = '{"issues": []}'
-    original = {'tests/test_main.py': b'def test_version():\n    assert version == "0.1.0"\n', 'private.py': b'PRIVATE_SENTINEL'}
-    operations = [{'action':'modify','path':'tests/test_main.py','content':original['tests/test_main.py'].decode()+'\ndef test_greeting():\n    assert True\n'}]
-    assert Orchestrator(llm).review_patch('greeting', Plan(('greeting',), ('greeting',)), operations, original=original, approved_paths={'tests/test_main.py'}) == []
+    llm = Mock()
+    llm.generate.return_value = '{"issues": []}'
+    original = {
+        "tests/test_main.py": b'def test_version():\n    assert version == "0.1.0"\n',
+        "private.py": b"PRIVATE_SENTINEL",
+    }
+    operations = [
+        {
+            "action": "modify",
+            "path": "tests/test_main.py",
+            "content": original["tests/test_main.py"].decode()
+            + "\ndef test_greeting():\n    assert True\n",
+        }
+    ]
+    assert (
+        Orchestrator(llm).review_patch(
+            "greeting",
+            Plan(("greeting",), ("greeting",)),
+            operations,
+            original=original,
+            approved_paths={"tests/test_main.py"},
+        )
+        == []
+    )
     prompt = llm.generate.call_args.args[0]
-    assert 'PRIVATE_SENTINEL' not in prompt
-    assert '0.1.0' in prompt and 'Preserve unchanged pre-existing tests' in prompt
-    assert 'Proposed diffs' in prompt
+    assert "PRIVATE_SENTINEL" not in prompt
+    assert "0.1.0" in prompt and "Preserve unchanged pre-existing tests" in prompt
+    assert "Proposed diffs" in prompt
 
 
 def test_review_feedback_retries_and_requires_clean_review():
-    engine = Orchestrator(Mock()); engine.generate_patch = Mock(); engine.review_patch = Mock(); operations = [{'action':'create','path':'app.py','content':'x=1'}]
+    engine = Orchestrator(Mock())
+    engine.generate_patch = Mock()
+    engine.review_patch = Mock()
+    operations = [{"action": "create", "path": "app.py", "content": "x=1"}]
     engine.generate_patch.return_value = operations
-    engine.review_patch.side_effect = [['fix assertion'], []]
-    assert engine.reviewed_patch('task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock()) == operations
-    assert 'fix assertion' in engine.generate_patch.call_args.kwargs['feedback']
+    engine.review_patch.side_effect = [["fix assertion"], []]
+    assert (
+        engine.reviewed_patch(
+            "task", "prompt", Plan(("task",), ("criterion",)), {}, set(), Mock(), Mock()
+        )
+        == operations
+    )
+    assert "fix assertion" in engine.generate_patch.call_args.kwargs["feedback"]
     assert engine.review_patch.call_count == 2
 
 
 def test_persistent_review_failure_never_returns_patch():
-    engine = Orchestrator(Mock()); engine.generate_patch = Mock(); engine.review_patch = Mock(); engine.review_patch.return_value = ['missing tests']
-    with pytest.raises(ValueError, match='Tester review unresolved'):
-        engine.reviewed_patch('task','prompt',Plan(('task',),('criterion',)),{},set(),Mock(),Mock())
+    engine = Orchestrator(Mock())
+    engine.generate_patch = Mock()
+    engine.review_patch = Mock()
+    engine.review_patch.return_value = ["missing tests"]
+    with pytest.raises(ValueError, match="Tester review unresolved"):
+        engine.reviewed_patch(
+            "task", "prompt", Plan(("task",), ("criterion",)), {}, set(), Mock(), Mock()
+        )
 
 
 def test_syntax_error_is_repaired_in_generation():
-    llm = Mock(); llm.generate.side_effect = [json.dumps({'operations':[{'action':'create','path':'app.py','content':'def broken name(): pass'}]}),json.dumps({'operations':[{'action':'create','path':'app.py','content':'def fixed(): pass'}]})]
-    result = Orchestrator(llm).generate_patch('prompt',Plan(('task',),('criterion',)),validate=lambda ops: validate_operations(ops,{},set()))
-    assert result[0]['content'] == 'def fixed(): pass'
-    assert 'Syntax error' in llm.generate.call_args.args[0]
+    llm = Mock()
+    llm.generate.side_effect = [
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "create",
+                        "path": "app.py",
+                        "content": "def broken name(): pass",
+                    }
+                ]
+            }
+        ),
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "create",
+                        "path": "app.py",
+                        "content": "def fixed(): pass",
+                    }
+                ]
+            }
+        ),
+    ]
+    result = Orchestrator(llm).generate_patch(
+        "prompt",
+        Plan(("task",), ("criterion",)),
+        validate=lambda ops: validate_operations(ops, {}, set()),
+    )
+    assert result[0]["content"] == "def fixed(): pass"
+    assert "Syntax error" in llm.generate.call_args.args[0]
 
-@pytest.mark.parametrize('infra', [False, True])
+
+@pytest.mark.parametrize("infra", [False, True])
 def test_existing_broken_proposal_requires_new_approval(tmp_path, monkeypatch, infra):
-    import sys, types, subprocess
-    from pathlib import Path
+    import subprocess
+    import sys
+    import types
+
     import cmf_dev_studio.workspaces as ws
-    from cmf_dev_studio.projects import ProjectManager, ProjectLanguage
-    manager = ProjectManager(tmp_path/'data'); project = manager.create('demo', language=ProjectLanguage.PYTHON)
-    service = ws.WorkspaceService(manager); pid = 'a'*32
-    baseline = service.baselines/pid; baseline.mkdir()
-    workspace = service.root/pid; workspace.mkdir()
-    original = {'test_app.py': b'def test_old():\n    assert 1 == 1\n'}
+    from cmf_dev_studio.projects import ProjectLanguage, ProjectManager
+
+    manager = ProjectManager(tmp_path / "data")
+    project = manager.create("demo", language=ProjectLanguage.PYTHON)
+    service = ws.WorkspaceService(manager)
+    pid = "a" * 32
+    baseline = service.baselines / pid
+    baseline.mkdir()
+    workspace = service.root / pid
+    workspace.mkdir()
+    original = {"test_app.py": b"def test_old():\n    assert 1 == 1\n"}
     for root in (baseline, project.path):
-        (root/'test_app.py').write_bytes(original['test_app.py'])
-    broken = [{'action':'modify','path':'test_app.py','content':'def test_ greeting(): pass'}]
+        (root / "test_app.py").write_bytes(original["test_app.py"])
+    broken = [
+        {
+            "action": "modify",
+            "path": "test_app.py",
+            "content": "def test_ greeting(): pass",
+        }
+    ]
     changes = service._write_operations(pid, broken, original)
     with service._db() as db:
-        db.execute('INSERT INTO workspace_proposals(id,project_id,status,task,created_at,changes,approved_paths,plan) VALUES (?,?,?,?,?,?,?,?)', (pid,project.id,'ready','greeting','now',json.dumps(changes),json.dumps(['test_app.py']),json.dumps({'requirements':['greeting'],'acceptance':['greeting works']})))
-    calls=[]
-    def runner(root,spec):
+        db.execute(
+            "INSERT INTO workspace_proposals(id,project_id,status,task,created_at,changes,approved_paths,plan) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                pid,
+                project.id,
+                "ready",
+                "greeting",
+                "now",
+                json.dumps(changes),
+                json.dumps(["test_app.py"]),
+                json.dumps(
+                    {"requirements": ["greeting"], "acceptance": ["greeting works"]}
+                ),
+            ),
+        )
+    calls = []
+
+    def runner(root, spec):
         calls.append(spec.name)
-        if infra: return False, 'Runner: pytest (exit 125; infrastructure_error)\npermission denied'
-        result=subprocess.run([sys.executable,'-m','pytest','-q','-p','no:cacheprovider'],cwd=root,capture_output=True,text=True,env={**__import__('os').environ,'PYTHONDONTWRITEBYTECODE':'1'})
-        return result.returncode==0, f'Runner: pytest (exit {result.returncode}; test_result)\n'+result.stdout
-    monkeypatch.setattr(ws,'execute_runner',runner)
-    llm=Mock(); llm.generate.side_effect=[json.dumps({'operations':[{'action':'modify','path':'test_app.py','content':original['test_app.py'].decode()+'\ndef test_greeting():\n    assert "Hello" == "Hello"\n'}]}),'{"issues": []}']
-    module=types.ModuleType('cmf_dev_studio.llm.gemini'); module.GeminiClient=lambda:llm
-    monkeypatch.setitem(sys.modules,module.__name__,module)
+        if infra:
+            return (
+                False,
+                "Runner: pytest (exit 125; infrastructure_error)\npermission denied",
+            )
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+        return (
+            result.returncode == 0,
+            f"Runner: pytest (exit {result.returncode}; test_result)\n" + result.stdout,
+        )
+
+    monkeypatch.setattr(ws, "execute_runner", runner)
+    llm = Mock()
+    llm.generate.side_effect = [
+        json.dumps(
+            {
+                "operations": [
+                    {
+                        "action": "modify",
+                        "path": "test_app.py",
+                        "content": original["test_app.py"].decode()
+                        + '\ndef test_greeting():\n    assert "Hello" == "Hello"\n',
+                    }
+                ]
+            }
+        ),
+        '{"issues": []}',
+    ]
+    module = types.ModuleType("cmf_dev_studio.llm.gemini")
+    module.GeminiClient = lambda: llm
+    monkeypatch.setitem(sys.modules, module.__name__, module)
     with pytest.raises(ws.WorkspaceError, match="Explicit approval"):
         service.test(pid)
     preview = service.test_preview(pid)
-    result=service.test(pid, preview["approval"])
-    assert result['status']=='test_failed', result
-    assert len(calls)==1
-    assert llm.generate.call_count==0
-    assert (project.path/'test_app.py').read_bytes()==original['test_app.py']
+    result = service.test(pid, preview["approval"])
+    assert result["status"] == "test_failed", result
+    assert len(calls) == 1
+    assert llm.generate.call_count == 0
+    assert (project.path / "test_app.py").read_bytes() == original["test_app.py"]
     if not infra:
-        with pytest.raises(ws.WorkspaceError, match='Repair the failed patch before running tests again'):
-            service.test(pid, preview['approval'])
-        with pytest.raises(ws.WorkspaceError, match='Repair the failed patch before running tests again'):
+        with pytest.raises(
+            ws.WorkspaceError,
+            match="Repair the failed patch before running tests again",
+        ):
+            service.test(pid, preview["approval"])
+        with pytest.raises(
+            ws.WorkspaceError,
+            match="Repair the failed patch before running tests again",
+        ):
             service.test_preview(pid)
         assert len(calls) == 1
         assert llm.generate.call_count == 0
         return
-    with pytest.raises(ws.WorkspaceError, match='Explicit approval'):
-        service.test(pid, preview['approval'])
+    with pytest.raises(ws.WorkspaceError, match="Explicit approval"):
+        service.test(pid, preview["approval"])
     preview = service.test_preview(pid)
-    (workspace/'test_app.py').write_text('def test_new(): assert True')
-    with pytest.raises(ws.WorkspaceError, match='Explicit approval'):
-        service.test(pid, preview['approval'])
+    (workspace / "test_app.py").write_text("def test_new(): assert True")
+    with pytest.raises(ws.WorkspaceError, match="Explicit approval"):
+        service.test(pid, preview["approval"])

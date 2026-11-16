@@ -1,4 +1,5 @@
 """Local interactive PTY, available only to an explicitly connected browser."""
+
 import asyncio
 import fcntl
 import json
@@ -17,8 +18,12 @@ from fastapi import WebSocket
 def allowed_local_origin(ws: WebSocket) -> bool:
     origin = urlparse(ws.headers.get("origin", ""))
     host = ws.headers.get("host", "").split(":")[0]
-    return (origin.scheme in ("http", "https") and origin.hostname in ("127.0.0.1", "localhost")
-            and origin.port in (5173, 8000) and host in ("127.0.0.1", "localhost"))
+    return (
+        origin.scheme in ("http", "https")
+        and origin.hostname in ("127.0.0.1", "localhost")
+        and origin.port in (5173, 8000)
+        and host in ("127.0.0.1", "localhost")
+    )
 
 
 async def terminal_socket(ws: WebSocket, manager) -> None:
@@ -36,15 +41,24 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
         shell = os.environ.get("SHELL", "/bin/sh")
         if not os.path.isfile(shell) or not os.access(shell, os.X_OK):
             shell = "/bin/sh"
-        process = subprocess.Popen([shell], cwd=str(project.path), stdin=slave, stdout=slave,
-                                   stderr=slave, env={**os.environ, "TERM": "xterm-256color"},
-                                   start_new_session=True, close_fds=True)
+        process = subprocess.Popen(  # noqa: ASYNC220
+            [shell],
+            cwd=str(project.path),
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+            env={**os.environ, "TERM": "xterm-256color"},
+            start_new_session=True,
+            close_fds=True,
+        )
         os.close(slave)
         slave = -1
 
         async def output_loop():
             while process.poll() is None:
-                ready, _, _ = await asyncio.to_thread(select.select, [master], [], [], 0.15)
+                ready, _, _ = await asyncio.to_thread(
+                    select.select, [master], [], [], 0.15
+                )
                 if ready:
                     try:
                         data = os.read(master, 8192)
@@ -64,12 +78,18 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
                     os.write(master, message["bytes"])
                 elif message.get("text"):
                     event = json.loads(message["text"])
-                    if event.get("type") == "input" and isinstance(event.get("data"), str):
+                    if event.get("type") == "input" and isinstance(
+                        event.get("data"), str
+                    ):
                         os.write(master, event["data"].encode())
                     elif event.get("type") == "resize":
                         cols = max(20, min(300, int(event.get("cols", 80))))
                         rows = max(5, min(100, int(event.get("rows", 24))))
-                        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                        fcntl.ioctl(
+                            master,
+                            termios.TIOCSWINSZ,
+                            struct.pack("HHHH", rows, cols, 0, 0),
+                        )
         except (OSError, ValueError, KeyError, RuntimeError):
             pass
         finally:

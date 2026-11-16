@@ -13,9 +13,7 @@ def test_gemini_client_generates_text():
     response into the string expected by our LLM interface.
     """
     sdk_client = Mock()
-    sdk_client.models.generate_content.return_value.text = (
-        "Generated requirements"
-    )
+    sdk_client.models.generate_content.return_value.text = "Generated requirements"
 
     client = GeminiClient(
         model="gemini-2.5-flash",

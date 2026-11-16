@@ -73,7 +73,9 @@ def test_unknown_id_returns_none(tmp_path):
     assert ProjectManager(tmp_path / "studio").get("not-found") is None
 
 
-@pytest.mark.parametrize("language", [ProjectLanguage.PYTHON, ProjectLanguage.JAVA, ProjectLanguage.KOTLIN])
+@pytest.mark.parametrize(
+    "language", [ProjectLanguage.PYTHON, ProjectLanguage.JAVA, ProjectLanguage.KOTLIN]
+)
 def test_create_project_with_language(tmp_path, language):
     """Managed projects preserve their configured programming language."""
     manager = ProjectManager(tmp_path / "studio")
@@ -85,20 +87,28 @@ def test_create_project_with_language(tmp_path, language):
 def test_project_language_persists_after_reload(tmp_path):
     """Project language survives restarting the project manager."""
     data_dir = tmp_path / "studio"
-    project = ProjectManager(data_dir).create("Calculator", language=ProjectLanguage.JAVA)
+    project = ProjectManager(data_dir).create(
+        "Calculator", language=ProjectLanguage.JAVA
+    )
     assert ProjectManager(data_dir).get(project.id).language is ProjectLanguage.JAVA
 
 
 def test_project_language_defaults_to_auto(tmp_path):
     """Projects without an explicit language retain automatic detection."""
-    assert ProjectManager(tmp_path / "studio").create("Calculator").language is ProjectLanguage.AUTO
+    assert (
+        ProjectManager(tmp_path / "studio").create("Calculator").language
+        is ProjectLanguage.AUTO
+    )
 
 
 def test_existing_project_defaults_to_auto(tmp_path):
     """Registered repositories retain automatic language detection."""
     repository = tmp_path / "repository"
     repository.mkdir()
-    assert ProjectManager(tmp_path / "studio").register_existing(repository).language is ProjectLanguage.AUTO
+    assert (
+        ProjectManager(tmp_path / "studio").register_existing(repository).language
+        is ProjectLanguage.AUTO
+    )
 
 
 def test_migrate_legacy_project_database(tmp_path):
@@ -109,7 +119,10 @@ def test_migrate_legacy_project_database(tmp_path):
         db.execute("ALTER TABLE projects DROP COLUMN language")
     migrated = ProjectManager(manager.data_dir)
     assert migrated.get(original.id) == original
-    assert migrated.create("New", language=ProjectLanguage.KOTLIN).language is ProjectLanguage.KOTLIN
+    assert (
+        migrated.create("New", language=ProjectLanguage.KOTLIN).language
+        is ProjectLanguage.KOTLIN
+    )
     assert ProjectManager(manager.data_dir).get(original.id) == original
 
 
