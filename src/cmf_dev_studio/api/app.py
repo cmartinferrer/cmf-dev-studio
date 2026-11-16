@@ -262,6 +262,27 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (WorkspaceError, OSError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/api/proposals/{proposal_id}/repair")
+    def repair_proposal(proposal_id: str) -> dict:
+        try:
+            return workspaces.repair(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    class DeferRequest(BaseModel):
+        action: str
+
+    @app.post("/api/proposals/{proposal_id}/defer")
+    def defer_proposal(proposal_id: str, request: DeferRequest) -> dict:
+        try:
+            return workspaces.defer(proposal_id, request.action)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/api/proposals/{proposal_id}/apply")
     def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
         try:

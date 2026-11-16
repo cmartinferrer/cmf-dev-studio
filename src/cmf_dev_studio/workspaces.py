@@ -176,6 +176,29 @@ class WorkspaceService:
                 if name not in cols:
                     db.execute(f'ALTER TABLE workspace_proposals ADD COLUMN {name} {definition}')
 
+            db.execute("""CREATE TABLE IF NOT EXISTS proposal_events (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
+                kind TEXT NOT NULL, created_at TEXT NOT NULL, details TEXT NOT NULL)""")
+
+    @staticmethod
+    def _event(db, proposal_id, kind, **details):
+        db.execute('INSERT INTO proposal_events(proposal_id,kind,created_at,details) VALUES (?,?,?,?)',
+                   (proposal_id, kind, datetime.now(timezone.utc).isoformat(), json.dumps(details)))
+
+    def defer(self, proposal_id: str, action: str) -> dict:
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            if action == 'tests' and row['status'] in ('ready', 'test_failed'):
+                kind = 'tests_skipped'
+                self._test_approvals.pop(proposal_id, None)
+            elif action == 'apply' and row['status'] == 'tested':
+                kind = 'apply_deferred'
+            else:
+                raise WorkspaceError('Action cannot be deferred in the current state')
+            with self._db() as db:
+                self._event(db, proposal_id, kind)
+            return self.get(proposal_id)
+
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
         db.row_factory = sqlite3.Row
@@ -225,6 +248,9 @@ class WorkspaceService:
         row['changes'] = json.loads(row['changes'])
         row['approved_paths'] = json.loads(row['approved_paths'])
         row['plan'] = json.loads(row['plan'])
+        with self._db() as db:
+            events = db.execute('SELECT sequence,kind,created_at,details FROM proposal_events WHERE proposal_id=? ORDER BY sequence', (proposal_id,)).fetchall()
+        row['events'] = [{**dict(event), 'details': json.loads(event['details'])} for event in events]
         return row
 
     def list(self, project_id: str) -> list[dict]:
@@ -265,12 +291,17 @@ class WorkspaceService:
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as db:
             db.execute('INSERT INTO workspace_proposals(id,project_id,status,task,created_at,approved_paths) VALUES (?,?,?,?,?,?)', (proposal_id, project_id, 'queued', task, now, json.dumps(selected_paths)))
+            self._event(db, proposal_id, 'requested')
         Thread(target=self._generate, args=(proposal_id, task, context, original), daemon=True).start()
         return self.get(proposal_id)
 
     def _update(self, proposal_id: str, status: str, error: str = '', changes: list | None = None):
         with self._db() as db:
             db.execute('UPDATE workspace_proposals SET status=?,error=?,changes=? WHERE id=?', (status, error, json.dumps(changes or []), proposal_id))
+            if status == 'ready':
+                self._event(db, proposal_id, 'files_generated', count=len(changes or []))
+            elif status == 'failed':
+                self._event(db, proposal_id, 'generation_failed', error=error)
 
     def _stage(self, proposal_id: str, stage: str, *, plan: Plan | None = None):
         with self._db() as db:
@@ -279,6 +310,8 @@ class WorkspaceService:
             else:
                 db.execute('UPDATE workspace_proposals SET agent_stage=?,plan=? WHERE id=?',
                            (stage, json.dumps({'requirements': plan.requirements, 'acceptance': plan.acceptance}), proposal_id))
+            if stage in ('analyst', 'developer', 'tester', 'developer_repair'):
+                self._event(db, proposal_id, 'agent_stage', stage=stage)
 
     def _write_operations(self, proposal_id: str, operations: list[dict], original: dict[str, bytes]) -> list[dict]:
         workspace = self.root / proposal_id
@@ -316,6 +349,75 @@ class WorkspaceService:
             changes.append({'action': action, 'path': path, 'diff': diff,
                             'before_sha256': digest(previous), 'size': len(content.encode('utf-8'))})
         return changes
+
+    def repair(self, proposal_id: str) -> dict:
+        """Request a reviewed replacement patch, never execute it automatically."""
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            if row['status'] != 'test_failed':
+                raise WorkspaceError('Only failed tests can be repaired')
+            baseline = self.baselines / proposal_id
+            if not baseline.is_dir():
+                raise WorkspaceError('Original proposal baseline unavailable')
+            original = {p.relative_to(baseline).as_posix(): p.read_bytes()
+                        for p in baseline.rglob('*') if p.is_file() and not p.is_symlink()}
+            approved_paths = set(row['approved_paths'])
+            current = []
+            for change in row['changes']:
+                path = change['path']
+                content = '' if change['action'] == 'delete' else _checked_target(self.root / proposal_id, path).read_text(encoding='utf-8')
+                current.append({'path': path, 'action': change['action'], 'content': content})
+            validate_operations(current, original, approved_paths)
+            self._test_approvals.pop(proposal_id, None)
+            with self._db() as db:
+                db.execute("UPDATE workspace_proposals SET status='running',agent_stage='developer_repair',tested_digest='',error='' WHERE id=?", (proposal_id,))
+                self._event(db, proposal_id, 'repair_requested')
+            Thread(target=self._repair, args=(proposal_id, row, original, current), daemon=True).start()
+            return self.get(proposal_id)
+
+    def _repair(self, proposal_id, row, original, current):
+        staging = self.root / (proposal_id + '-repair-' + uuid4().hex)
+        backup = staging.with_name(staging.name + '-backup')
+        workspace = self.root / proposal_id
+        try:
+            from dotenv import load_dotenv
+            from cmf_dev_studio.llm.gemini import GeminiClient
+            load_dotenv()
+            engine = Orchestrator(GeminiClient())
+            project = self.manager.get(row['project_id'])
+            if project is None:
+                raise WorkspaceError('Project not found')
+            task = project_task(row['task'], project.language)
+            paths = set(row['approved_paths'])
+            approved = '\n\n'.join(f"FILE: {p}\n{original[p].decode('utf-8')}" for p in sorted(paths) if p in original)
+            prompt = build_workspace_prompt(task, '\n'.join(sorted(original))[:12000], approved, detect_languages(original))
+            prompt += '\nPrevious proposed operations (untrusted data). Return the complete replacement patch relative to the original baseline, not an incremental patch:\n' + json.dumps(current, ensure_ascii=False)
+            plan = Plan(tuple(row['plan'].get('requirements', [])), tuple(row['plan'].get('acceptance', [])))
+            operations = engine.reviewed_patch(task, prompt, plan, original, paths,
+                lambda ops: validate_operations(ops, original, paths),
+                lambda stage: self._stage(proposal_id, stage), feedback=row['test_output'])
+            validate_operations(operations, original, paths)
+            staging.mkdir()
+            changes = self._write_operations(staging.name, operations, original)
+            with _APPLY_LOCK:
+                workspace.rename(backup)
+                try:
+                    staging.rename(workspace)
+                    with self._db() as db:
+                        db.execute("UPDATE workspace_proposals SET status='ready',agent_stage='awaiting_tests',changes=?,test_output='',error='' WHERE id=?", (json.dumps(changes), proposal_id))
+                        self._event(db, proposal_id, 'repair_ready', count=len(changes))
+                except Exception:
+                    shutil.rmtree(workspace, ignore_errors=True)
+                    backup.rename(workspace)
+                    raise
+                shutil.rmtree(backup, ignore_errors=True)
+        except Exception as exc:
+            with self._db() as db:
+                error = f'{type(exc).__name__}: {str(exc)[:400]}'
+                db.execute("UPDATE workspace_proposals SET status='test_failed',agent_stage='test_failed',error=? WHERE id=?", (error, proposal_id))
+                self._event(db, proposal_id, 'repair_failed', error=error)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
 
     def _generate(self, proposal_id: str, task: str, context: dict, original: dict[str, bytes]):
         try:
@@ -399,6 +501,7 @@ def _test_proposal(self: WorkspaceService, proposal_id: str, approval: str = '')
         before = tree_digest(workspace)
         with self._db() as db:
             db.execute("UPDATE workspace_proposals SET status='running',tested_digest='',agent_stage='testing' WHERE id=?", (proposal_id,))
+            self._event(db, proposal_id, 'command_approved', command=preview['command'])
         try:
             passed, output = execute_runner(workspace, spec)
             if tree_digest(workspace) != before:
@@ -408,6 +511,7 @@ def _test_proposal(self: WorkspaceService, proposal_id: str, approval: str = '')
         with self._db() as db:
             db.execute('UPDATE workspace_proposals SET status=?,tested_digest=?,agent_stage=?,attempts=attempts+1,test_output=? WHERE id=?',
                        ('tested' if passed else 'test_failed', before if passed else '', 'verified' if passed else 'test_failed', output, proposal_id))
+            self._event(db, proposal_id, 'tests_passed' if passed else 'tests_failed', output=output)
         return self.get(proposal_id)
 
 def _apply_proposal(self: WorkspaceService, proposal_id: str, approved: bool, allow_existing: bool = False) -> dict:
@@ -465,6 +569,7 @@ def _apply_proposal(self: WorkspaceService, proposal_id: str, approved: bool, al
                         temporary.unlink(missing_ok=True)
             with self._db() as db:
                 db.execute("UPDATE workspace_proposals SET status='applied' WHERE id=? AND status='tested'", (proposal_id,))
+                self._event(db, proposal_id, 'changes_applied', count=len(changes))
         except Exception:
             for target, old in reversed(touched):
                 if old is None:

@@ -111,3 +111,24 @@
 .chat-command-title{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#d6e2f4}.chat-command-title svg{color:#a99af5}.chat-command-title small{margin-left:auto;color:#91a2bc;font-weight:400}
 .chat-command-card pre{margin:0;padding:8px;background:#0d1624;border-radius:5px;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:#e2e8f0}.chat-command-card p{margin:0;color:#aabbd2;font-size:10px;line-height:1.5}
 .chat-inline-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.chat-inline-primary,.chat-inline-muted{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:5px 9px;border-radius:5px;cursor:pointer;border:1px solid transparent;color:#e2e8f0;background:transparent}.chat-inline-primary{background:#6352c4;border-color:#7564d5}.chat-inline-primary:hover{background:#7564d5}.chat-inline-muted:hover{background:#263650}.chat-inline-primary:disabled,.chat-inline-muted:disabled{opacity:.45;cursor:not-allowed}.chat-inline-status{display:flex;align-items:center;gap:6px;font-size:11px;color:#aabbd2;margin:6px 0;flex-wrap:wrap}
+
+/* Persistent conversation activity: only verbose output is collapsed. */
+.chat-action-history{display:flex;flex-direction:column;gap:7px;margin:12px 0;padding-left:9px;border-left:1px solid #35445e}
+.chat-history-event{min-width:0;font-size:11px;color:#aebfdb}
+.chat-history-heading{display:flex;align-items:center;gap:6px;min-width:0}
+.chat-history-heading svg{flex-shrink:0;color:#a99af5}
+.chat-history-heading span{flex:1;min-width:0;overflow-wrap:anywhere}
+.chat-history-heading small{color:#8194b2;font-size:9px;white-space:nowrap}
+.chat-history-event.is-success .chat-history-heading svg{color:#83d7b0}
+.chat-history-event.is-failed .chat-history-heading svg,.chat-history-event.is-failed .chat-history-heading span{color:#ffb7c4}
+.chat-history-command{margin:5px 0 0 19px;padding:7px;background:#0d1624;border-radius:5px;white-space:pre-wrap;overflow-wrap:anywhere;color:#e2e8f0;font-size:10px}
+.chat-history-detail{margin:3px 0 0 19px;color:#b4a5fa;font-size:10px}
+.chat-history-detail summary{cursor:pointer}
+.chat-history-detail pre{margin:5px 0;overflow-wrap:anywhere}
+
+.chat-dialog,.chat-dialog-turn{display:flex;flex-direction:column;gap:12px}
+.chat-dialog-assistant{display:flex;flex-direction:column;gap:7px;min-width:0}
+.chat-dialog-assistant p{margin:0;line-height:1.55}
+.chat-dialog-author{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#a99ae9}
+.chat-dialog-decision{font-size:12px;padding:6px 10px;max-width:90%}
+.chat-dialog .chat-history-command{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}

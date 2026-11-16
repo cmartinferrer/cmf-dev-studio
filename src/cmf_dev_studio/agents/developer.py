@@ -19,7 +19,7 @@ class DeveloperAgent:
             '\nExternally observable acceptance criteria:\n' +
             ('\n'.join('- ' + r for r in plan.acceptance) or '(no additional criteria)') +
             '\nGenerate concrete runnable tests when the requested change is testable. '
-            'Do not generate self-referential or tautological assertions.\n'
+            'Do not generate self-referential or tautological assertions. Preserve conventional indentation, blank lines and real line breaks in every source and build file. Encode line breaks as JSON newline escapes, never flatten or minify code. Check imports and syntax; Java static imports must begin with import static. For new Maven projects specify compatible Java release and explicit compiler and test plugin versions. Preserve existing build conventions.\n'
         )
         last_error = ''
         for attempt in range(max_attempts):
