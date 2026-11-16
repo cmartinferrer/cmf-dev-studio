@@ -21,6 +21,8 @@ CMF Dev Studio is an open-source, local-first, browser-based development environ
 - [Configuration](#configuration)
 - [Project structure](#project-structure)
 - [Testing](#testing)
+- [Code quality](#code-quality)
+- [Continuous integration](#continuous-integration)
 - [Security and privacy](#security-and-privacy)
   - [Dependency security](#dependency-security)
 - [Extending the platform](#extending-the-platform)
@@ -40,12 +42,14 @@ The project remains an ongoing learning and engineering initiative. By releasing
 
 ## Features
 
-- **Integrated workspace:** project registry, file explorer, search, Monaco editor, file tabs, save/delete operations and an interactive local terminal.
+- **Integrated workspace:** project registry, language selection, file explorer, search, Monaco editor, file tabs and an interactive local terminal.
+- **File management:** create, rename, delete, move, copy and paste files and folders; drag and drop, multi-selection and automatic numbered copies prevent accidental overwrites.
 - **AI-assisted development:** describe a change in natural language and receive a repository-level proposal with requirements, acceptance criteria and file diffs.
 - **Single orchestrator:** Analyst, Developer and Tester collaborate through one language-independent workflow.
 - **Multi-language testing:** automatic runner selection for Python/pytest, Java/Maven and Kotlin/Gradle.
-- **Iterative review:** bounded agent review before execution; failed tests require a new user decision.
-- **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider.
+- **Iterative review:** bounded functional review and test-quality guidance; failed tests can trigger a user-requested repair, with fresh approval before executing a changed proposal.
+- **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider. The active file is suggested automatically; additional files can be selected manually or through the explorer.
+- **Conversational workflow:** inline approvals, persisted chat history and retries with original or updated context.
 - **Human-controlled application:** review and test isolated changes before explicitly applying them to the original project.
 - **Local persistence:** SQLite project registry and proposal history, with snapshots stored on disk.
 
@@ -109,14 +113,17 @@ flowchart TD
     Permission -->|No| Keep
     Run --> Result{Tests pass?}
     Result -->|Yes| Diff[Review verified diffs]
-    Result -->|Failure| Stop[Report failure]
+    Result -->|Failure| Failure[Report failure]
+    Failure --> Repair{User requests repair?}
+    Repair -->|Yes, retry allowed| Developer
+    Repair -->|No or retries exhausted| Stop[Stop]
     Review -->|Retries exhausted| Stop
     Diff --> Approval{User approves?}
     Approval -->|Yes, conflict checks pass| Apply[Apply changes]
     Approval -->|No| Keep[Keep original unchanged]
 ```
 
-Generation and testing are separate phases of a persisted proposal. Failed tests can be retried without starting a new task. Agent reviews do not replace actual test execution or developer review.
+Generation and testing are separate phases of a persisted proposal. Failed tests can be repaired without starting a new task. Changed proposals require fresh execution approval; infrastructure failures are reported separately. Functional review and generated tests are guided by the original acceptance criteria. Agent reviews do not replace actual test execution or developer review.
 
 ## Supported languages
 
@@ -126,7 +133,7 @@ Generation and testing are separate phases of a persisted proposal. Failed tests
 | Java | Root `pom.xml` | Maven 3.9 | JDK 21 |
 | Kotlin / Java | Root `build.gradle.kts` or `build.gradle` | Gradle 8.14 | JDK 21 |
 
-The Maven and Gradle adapters require test sources under `src/test/`. The Gradle reference project uses Kotlin. Runner selection prioritizes Maven, then Gradle, then Python. Dependencies must be available in the runner image; arbitrary dependencies are not downloaded during verification.
+The Maven and Gradle adapters require test sources under `src/test/`. The Gradle reference project uses Kotlin. Runner selection prioritizes Maven, then Gradle, then Python. Commands execute using locally installed tools after explicit approval. Maven and Gradle can resolve dependencies over the network. Python verification currently uses the Studio Python environment; independent project environments and automated dependency preparation are not yet implemented. The versions in the table describe reference workflows, not mandatory versions for every project.
 
 ## Technology stack
 
@@ -137,7 +144,7 @@ The Maven and Gradle adapters require test sources under `src/test/`. The Gradle
 | Editor and terminal | Monaco Editor, xterm.js, local PTY |
 | AI | Google Gemini SDK, structured JSON responses |
 | Execution | pytest, Maven, Gradle |
-| Tooling | uv, npm, pytest |
+| Tooling | uv, npm, pytest, Ruff |
 
 ## Getting started
 
@@ -191,12 +198,16 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The frontend proxies API an
 
 ## Using the IDE
 
-1. Create a managed project or choose **Open existing project** and register a local directory.
-2. Browse files in the explorer, open them in the editor, or use the integrated terminal.
-3. Open the assistant and describe a concrete development task. If existing files are needed, choose and preview the context, then authorize it and retry the request.
-4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution. Failed tests do not trigger automatic repair or execution.
-5. Review the test output. If verification fails, inspect the error or retry after addressing the cause.
-6. Accept verified changes explicitly. Approve the inline Accept changes action to write verified files, including explicit authorization for registered projects. No project-name confirmation is required.
+1. Create a managed project or choose **Open existing project** and register a local directory. Select the project language when creating a project or update it from the workspace status bar.
+2. Browse and manage files and folders in the explorer. Use Ctrl/Cmd-click or Shift-click for multi-selection, drag and drop to move items, and Copy/Paste to duplicate them. Open files in the editor or use the integrated terminal.
+3. Open the assistant and describe a concrete development task. Review the suggested active-file context, remove unwanted files or add context manually, then authorize eligible contents before sending them to the AI provider.
+4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution.
+5. Review the test output. If verification fails, inspect the error and request a repair when appropriate. A changed proposal requires fresh execution approval. Generation retries can reuse the original context or use an explicitly approved replacement.
+6. Accept verified changes explicitly using the inline **Accept changes** action, including explicit authorization for registered projects. No project-name confirmation is required.
+
+### Project programming language
+
+New managed projects can select Python, Java or Kotlin. The setting is persisted and supplied to the agents during proposal generation. Existing projects may use automatic detection. Runner selection still follows the build files; the language setting is not a security restriction.
 
 ### Example: Java calculator
 
@@ -225,7 +236,7 @@ The same process works with `examples/kotlin-gradle` and `examples/python-pytest
 
 The Gemini adapter currently defaults to `gemini-3.5-flash-lite`; model availability depends on the provider and account. The model is configured in code, not through a dedicated environment variable. Export the optional `STUDIO_*` variables in the backend shell before starting it; the API reads them from the process environment. The `.env` file is loaded for AI operations.
 
-Keep `.studio-data/` and `.env` when upgrading. The registry stores absolute project paths, so moving a checkout that contains managed projects can invalidate their paths. Keep the existing checkout location or explicitly migrate those paths before moving it. No database schema changes are required for this branding release.
+Keep `.studio-data/` and `.env` when upgrading. The registry stores absolute project paths, so moving a checkout that contains managed projects can invalidate their paths. Keep the existing checkout location or explicitly migrate those paths before moving it.
 
 ## Project structure
 
@@ -280,6 +291,36 @@ npm run build
 
 For end-to-end verification, open each reference project in the IDE, submit a change, authorize context, inspect test results and apply the verified proposal. This requires valid Gemini credentials.
 
+## Code quality
+
+Ruff is a locked development dependency used to lint and format the Studio Python code. Its configuration lives in `pyproject.toml`, targets Python 3.10 and uses an 88-character line length. The locked Ruff version provides the default lint rule selection.
+
+Run these checks from the repository root:
+
+```bash
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+```
+
+To apply automatic lint fixes and formatting locally:
+
+```bash
+uv run --locked ruff check . --fix
+uv run --locked ruff format .
+```
+
+Review the resulting diff and run the tests before committing. Do not apply unsafe fixes indiscriminately. Ruff is a development tool for CMF Dev Studio, not a mandatory requirement for projects generated by its agents.
+
+## Continuous integration
+
+The CI workflow runs on pushes to `main`, pull requests targeting `main`, and manual dispatch. It validates:
+
+- **Backend (Python 3.10 and 3.12):** locked dependencies, Ruff linting, Ruff formatting and non-integration pytest tests.
+- **Frontend (Node.js 22):** locked npm dependencies and production build.
+- **Secret scanning:** Gitleaks scans repository history.
+
+Native integration tests and Gemini-powered end-to-end checks are separate from the standard CI backend test run. Dependency audits are described below.
+
 ## Security and privacy
 
 - The application is intended for a trusted local user. Bind the backend and frontend to loopback; do not expose them to untrusted networks.
@@ -310,21 +351,22 @@ To add an AI provider, implement the `LLMClient` contract in `llm/`, including s
 
 ## Current limitations
 
-- Only the documented runner combinations and preinstalled dependencies are supported for verification. JVM caches are seeded from the reference projects; arbitrary Maven/Gradle dependency graphs and multi-module builds are not guaranteed to work.
-- AI requests are change-oriented; a general-purpose conversational coding assistant is not yet implemented.
+- Only the documented native runner combinations are supported for verification. Python tests currently use the Studio environment; automatic per-project dependency installation and independent execution environments are not implemented. Arbitrary Maven/Gradle dependency graphs and multi-module builds are not guaranteed to work.
+- The assistant supports conversational change proposals and retries, but is not yet a general-purpose coding assistant.
+- Explorer copy and move operations are limited to the current project and do not automatically refactor imports or code references.
 - Context discovery and snapshots have size and file-count limits. Generated changes and tests may be incorrect despite successful verification.
 - The application is a local alpha, not a production-hosted IDE. There is no multi-user authentication or authorization boundary.
 - Gemini access requires connectivity, credentials and provider availability.
 
 ## Roadmap
 
-Potential next steps include conversational assistance, smarter context selection, richer repository understanding, extensible dependency preparation and broader runner coverage. These are planned directions, not implemented features.
+Potential next steps include independent project execution environments, approved dependency preparation, richer repository understanding, Git integration and broader runner coverage. These are planned directions, not implemented features.
 
 ## Contributing
 
-Contributions, ideas and feedback are welcome. If you would like to improve the architecture, extend language support, refine agent workflows or enhance the developer experience, feel free to open an issue or submit a pull request once the repository is public.
+Contributions, ideas and feedback are welcome. If you would like to improve the architecture, extend language support, refine agent workflows or enhance the developer experience, feel free to open an issue or submit a pull request.
 
-Please keep changes focused, include relevant tests and preserve the project's explicit context authorization and human approval safeguards. Never include credentials, private repository contents or local application data in contributions.
+Please keep changes focused, run Ruff lint and format checks, include relevant tests and preserve the project's explicit context authorization and human approval safeguards. Never include credentials, private repository contents or local application data in contributions.
 
 ## Author
 
