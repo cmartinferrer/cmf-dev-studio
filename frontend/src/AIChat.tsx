@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Play, Send, ShieldCheck, X } from 'lucide-react';
+import { Bot, Check, ChevronDown, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, Terminal, X } from 'lucide-react';
 import { applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type ContextPreview, type Proposal, type ProposalChange } from './api';
 
 type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; contextDigest: string|null; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void; onContext: ()=>void; onApproveContext: (paths:string[], digest:string|null)=>void };
@@ -14,9 +14,9 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
   const [busy,setBusy] = useState(false);
   const [workingId,setWorkingId] = useState<string|null>(null);
   const [error,setError] = useState('');
-  const [confirmation,setConfirmation] = useState<string|null>(null);
-  const [confirmName,setConfirmName] = useState('');
-  const [allowExisting,setAllowExisting] = useState(false);
+  const [skipped,setSkipped] = useState<string[]>([]);
+  const [selectedApproval,setSelectedApproval] = useState<string|null>(null);
+  const [discarded,setDiscarded] = useState<string[]>([]);
   const [showOutput,setShowOutput] = useState<string|null>(null);
   const [showHistory,setShowHistory] = useState(false);
   const [contextOpen,setContextOpen] = useState(false);
@@ -33,7 +33,7 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
   }
   async function reviewContext(){try{setPreview(await previewRepositoryContext(projectId,selected));}catch(e){setError(String(e));}}
   const [testApproval,setTestApproval] = useState<{id:string; preview:TestPreview}|null>(null);
-  useEffect(()=>{let cancelled=false;setItems([]);setError('');setInsights(null);setContextOpen(false);setSelected(contextPaths);setPreview(null);setTestApproval(null);listProposals(projectId).then(result=>{if(!cancelled)setItems(result.reverse());}).catch(e=>{if(!cancelled)setError(String(e));});return()=>{cancelled=true;};},[projectId]);
+  useEffect(()=>{let cancelled=false;setItems([]);setError('');setInsights(null);setContextOpen(false);setSelected(contextPaths);setPreview(null);setTestApproval(null);setSkipped([]);setDiscarded([]);setSelectedApproval(null);listProposals(projectId).then(result=>{if(!cancelled)setItems(result.reverse());}).catch(e=>{if(!cancelled)setError(String(e));});return()=>{cancelled=true;};},[projectId]);
   useEffect(()=>{
     const pending=items.filter(item=>activeStatuses.includes(item.status));
     if(!pending.length)return;
@@ -50,12 +50,21 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
   async function submit(e:React.FormEvent){
     e.preventDefault();const task=draft.trim();if(!task||busy)return;
     setBusy(true);setError('');
-    try{const proposal=await createProposal(projectId,task,contextPaths,contextDigest);setItems(old=>[...old,proposal]);setDraft('');setShowHistory(false);window.setTimeout(()=>bottom.current?.scrollIntoView({behavior:'smooth',block:'end'}),50);}
+    try{const proposal=await createProposal(projectId,task,contextPaths,contextDigest);setItems(old=>[...old,proposal]);setDraft('');setShowHistory(false);setSelectedApproval(null);window.setTimeout(()=>bottom.current?.scrollIntoView({behavior:'smooth',block:'end'}),50);}
     catch(e){const message=e instanceof Error?e.message:String(e);setError(message);if(needsContext(message))await openContext();}finally{setBusy(false);}
   }
-  async function runTests(id:string){setWorkingId(id);setError('');try{setTestApproval({id,preview:await previewTest(id)});}catch(e){setError(String(e));}finally{setWorkingId(null);}}
-  async function approveTests(){if(!testApproval)return;const {id,preview}=testApproval;setTestApproval(null);setWorkingId(id);setError('');try{const result=await testProposal(id,preview.approval);setItems(old=>old.map(p=>p.id===id?result:p));}catch(e){setError(String(e));}finally{setWorkingId(null);}}
-  async function apply(id:string){setWorkingId(id);setError('');try{const result=await applyProposal(id,confirmName,allowExisting);setItems(old=>old.map(p=>p.id===id?result:p));setConfirmation(null);setConfirmName('');setAllowExisting(false);onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
+  const latest = items[items.length-1];
+  const approvalItem = items.find(item=>item.id===selectedApproval) ?? latest;
+  const previewId = approvalItem && ['ready','test_failed'].includes(approvalItem.status) && !skipped.includes(approvalItem.id) && !discarded.includes(approvalItem.id) ? approvalItem.id : null;
+  useEffect(()=>{
+    setTestApproval(null);
+    if(!previewId)return;
+    let cancelled=false;
+    previewTest(previewId).then(preview=>{if(!cancelled)setTestApproval({id:previewId,preview});}).catch(e=>{if(!cancelled){setError(String(e));setSkipped(old=>[...old,previewId]);}});
+    return()=>{cancelled=true;};
+  },[projectId,previewId,approvalItem?.attempts]);
+  async function approveTests(id:string){if(testApproval?.id!==id||workingId!==null)return;const {preview}=testApproval;setTestApproval(null);setWorkingId(id);setError('');try{const result=await testProposal(id,preview.approval);setItems(old=>old.map(p=>p.id===id?result:p));}catch(e){setError(String(e));setSkipped(old=>[...old,id]);}finally{setWorkingId(null);}}
+  async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id,projectKind==='existing');setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
   return <div className="chat-shell">
     <div className="chat-topline"><span><Bot size={15}/> Your coding assistant</span><button title="Choose files to share with AI" onClick={()=>void toggleContext()}><Paperclip size={14}/> Context {contextPaths.length>0?`(${contextPaths.length})`:''}</button></div>
     {contextOpen&&<div className="chat-context-inline">
@@ -89,13 +98,23 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
           {item.changes.length>0&&<div className="chat-change-card">
             <div className="chat-change-summary"><strong>{item.changes.length} {item.changes.length===1?'file':'files'}</strong><span>Review in editor</span></div>
             {item.changes.map(change=><button key={change.path} className="chat-change-row" onClick={()=>{onReview(item.id,change);}} title="Review diff in editor"><FileCode2 size={14}/><span>{change.path}</span><small>{change.action}</small><ChevronRight size={13}/></button>)}
-            {item.status==='tested'&&<div className="chat-test-success"><Check size={14}/> Tests passed</div>}
-            {item.status==='test_failed'&&<div className="chat-error"><CircleAlert size={14}/> Tests failed; changes have not been applied</div>}
-            {item.status==='applied'&&<div className="chat-test-success"><Check size={14}/> Changes saved to your project</div>}
-            {item.test_output&&<><button className="chat-link" onClick={()=>setShowOutput(showOutput===item.id?null:item.id)}>{showOutput===item.id?'Hide':'Show'} test output</button>{showOutput===item.id&&<pre className="chat-test-output">{item.test_output}</pre>}</>}
-            {['ready','test_failed'].includes(item.status)&&<button className="chat-secondary-action" disabled={workingId!==null} onClick={()=>void runTests(item.id)}><Play size={13}/> {workingId===item.id?'Running tests…':item.status==='test_failed'?'Run tests again':'Run tests'}</button>}
-            {item.status==='tested'&&<button className="chat-accept" disabled={workingId!==null} onClick={()=>{setConfirmation(item.id);setConfirmName('');setAllowExisting(false);}}> <ShieldCheck size={14}/> Accept changes</button>}
           </div>}
+          {item.status==='tested'&&<div className="chat-test-success"><Check size={14}/> Tests passed</div>}
+          {item.status==='test_failed'&&<div className="chat-error"><CircleAlert size={14}/> Tests failed; changes have not been applied</div>}
+          {item.status==='applied'&&<div className="chat-test-success"><Check size={14}/> Changes saved to your project</div>}
+          {item.test_output&&<><button className="chat-link" onClick={()=>setShowOutput(showOutput===item.id?null:item.id)}>{showOutput===item.id?'Hide':'Show'} test output</button>{showOutput===item.id&&<pre className="chat-test-output">{item.test_output}</pre>}</>}
+          {workingId===item.id&&<div className="chat-inline-status" role="status"><LoaderCircle className="chat-spin" size={14}/> {item.status==='tested'?'Applying changes…':'Running approved local tests…'}</div>}
+          {item.id!==approvalItem?.id&&['ready','test_failed'].includes(item.status)&&<button className="chat-link" disabled={workingId!==null} onClick={()=>setSelectedApproval(item.id)}>Review command</button>}
+          {item.id===approvalItem?.id&&['ready','test_failed'].includes(item.status)&&workingId!==item.id&&(!skipped.includes(item.id)?<>
+            <p className="chat-action-text">{item.status==='test_failed'?'I can run the tests again.':'I’d like to run the tests to verify these changes.'}</p>
+            <div className="chat-command-card">
+              <div className="chat-command-title"><Terminal size={14}/> Run command <small>Local</small></div>
+              {testApproval?.id===item.id?<><pre>{testApproval.preview.command.map(arg=>/^[\w./:=+-]+$/.test(arg)?arg:JSON.stringify(arg)).join(' ')}</pre><p>Runs a temporary copy with your user permissions and Internet access. Review the files first.</p><div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>setSkipped(old=>[...old,item.id])}>Skip</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void approveTests(item.id)}>Allow once</button></div></>:<><p>Preparing command approval…</p><button className="chat-inline-muted" onClick={()=>setSkipped(old=>[...old,item.id])}>Cancel</button></>}
+            </div></>:<div className="chat-inline-status">Tests not authorized. <button className="chat-link" onClick={()=>setSkipped(old=>old.filter(id=>id!==item.id))}>Request again</button></div>)}
+          {item.status==='tested'&&workingId!==item.id&&(discarded.includes(item.id)?<div className="chat-inline-status">Changes not applied. <button className="chat-link" onClick={()=>setDiscarded(old=>old.filter(id=>id!==item.id))}>Review again</button></div>:<>
+            <p className="chat-action-text">Tests passed. Apply the verified changes to {projectName}?{projectKind==='existing'?' This will write to your registered project.':''}</p>
+            <div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>setDiscarded(old=>[...old,item.id])}>Not now</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void apply(item.id)}><Check size={13}/> Accept changes</button></div>
+          </>)}
         </div>
       </div>)}
       <div ref={bottom}/>
@@ -105,7 +124,5 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,c
       <textarea aria-label="Ask AI" placeholder="Ask AI to change your project…" rows={3} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();void submit(e);}}}/>
       <div className="chat-composer-bottom"><span>Changes require your approval</span><button type="submit" aria-label="Send to AI" disabled={!draft.trim()||busy}>{busy?<LoaderCircle className="chat-spin" size={16}/>:<Send size={16}/>}</button></div>
     </form>
-    {testApproval&&<div className="chat-modal-backdrop"><div className="chat-modal" role="dialog" aria-modal="true" aria-label="Approve local command"><h3>Allow local test command?</h3><pre>{JSON.stringify(testApproval.preview.command)}</pre><p>{testApproval.preview.working_directory}. This runs code with your user permissions and Internet access. Review the proposed files first.</p><div className="chat-modal-actions"><button onClick={()=>setTestApproval(null)}>Reject</button><button className="chat-accept" disabled={workingId!==null} onClick={()=>void approveTests()}>Allow once</button></div></div></div>}
-    {confirmation!==null&&<div className="chat-modal-backdrop" role="presentation"><div className="chat-modal" role="dialog" aria-modal="true" aria-label="Confirm applying changes"><h3>Apply changes to {projectName}?</h3><p>The tested files will be written to your project. Type the project name to confirm.</p><input aria-label="Exact project name" placeholder={projectName} value={confirmName} onChange={e=>setConfirmName(e.target.value)}/>{projectKind==='existing'&&<label><input type="checkbox" checked={allowExisting} onChange={e=>setAllowExisting(e.target.checked)}/> I authorize changes to this registered project</label>}<div className="chat-modal-actions"><button onClick={()=>setConfirmation(null)}>Cancel</button><button className="chat-accept" disabled={workingId!==null||confirmName!==projectName||(projectKind==='existing'&&!allowExisting)} onClick={()=>void apply(confirmation)}>Apply changes</button></div></div></div>}
   </div>;
 }

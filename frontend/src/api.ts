@@ -42,7 +42,7 @@ export const getProposal = (proposalId: string) => request<Proposal>(`/proposals
 export type TestPreview = {command: string[]; approval: string; working_directory: string; timeout: number};
 export const previewTest = (proposalId: string) => request<TestPreview>(`/proposals/${encodeURIComponent(proposalId)}/test`);
 export const testProposal = (proposalId: string, approval: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST', body: JSON.stringify({approval})});
-export const applyProposal = (proposalId: string, confirmation: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({confirmation, allow_existing: allowExisting})});
+export const applyProposal = (proposalId: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({approved: true, allow_existing: allowExisting})});
 
 export type EditableFile = FilePreview & { sha256: string };
 export const openEditableFile = (projectId: string, path: string) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file?path=${encodeURIComponent(path)}`);

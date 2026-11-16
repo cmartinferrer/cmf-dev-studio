@@ -25,25 +25,25 @@ def proposal(tmp_path, existing=False):
 
 def test_apply_managed(tmp_path):
     service, project, pid = proposal(tmp_path)
-    with pytest.raises(WorkspaceError, match='exact project name'):
-        service.apply(pid, 'wrong')
-    assert service.apply(pid, 'sample')['status'] == 'applied'
+    with pytest.raises(WorkspaceError, match='Explicit approval'):
+        service.apply(pid, False)
+    assert service.apply(pid, True)['status'] == 'applied'
     assert (project.path / 'main.py').read_text() == 'print(2)\n'
 
 
 def test_apply_existing_requires_authorization(tmp_path):
     service, project, pid = proposal(tmp_path, True)
     with pytest.raises(WorkspaceError, match='explicit write authorization'):
-        service.apply(pid, 'sample')
+        service.apply(pid, True)
     assert not (project.path / 'main.py').exists()
-    assert service.apply(pid, 'sample', True)['status'] == 'applied'
+    assert service.apply(pid, True, True)['status'] == 'applied'
 
 
 def test_apply_conflict(tmp_path):
     service, project, pid = proposal(tmp_path)
     (project.path / 'main.py').write_text('changed')
     with pytest.raises(WorkspaceError, match='Conflict'):
-        service.apply(pid, 'sample')
+        service.apply(pid, True)
     assert (project.path / 'main.py').read_text() == 'changed'
 
 
@@ -53,5 +53,5 @@ def test_symlink_rejected(tmp_path):
     outside.write_text('safe')
     (project.path / 'main.py').symlink_to(outside)
     with pytest.raises(WorkspaceError, match='Unsafe destination'):
-        service.apply(pid, 'sample')
+        service.apply(pid, True)
     assert outside.read_text() == 'safe'

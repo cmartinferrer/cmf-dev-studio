@@ -196,7 +196,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The frontend proxies API an
 3. Open the assistant and describe a concrete development task. If existing files are needed, choose and preview the context, then authorize it and retry the request.
 4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution. Failed tests do not trigger automatic repair or execution.
 5. Review the test output. If verification fails, inspect the error or retry after addressing the cause.
-6. Accept verified changes explicitly. Existing projects require additional write authorization; follow the confirmation shown by the IDE.
+6. Accept verified changes explicitly. Approve the inline Accept changes action to write verified files, including explicit authorization for registered projects. No project-name confirmation is required.
 
 ### Example: Java calculator
 

@@ -410,7 +410,7 @@ def _test_proposal(self: WorkspaceService, proposal_id: str, approval: str = '')
                        ('tested' if passed else 'test_failed', before if passed else '', 'verified' if passed else 'test_failed', output, proposal_id))
         return self.get(proposal_id)
 
-def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str, allow_existing: bool = False) -> dict:
+def _apply_proposal(self: WorkspaceService, proposal_id: str, approved: bool, allow_existing: bool = False) -> dict:
     with _APPLY_LOCK:
         row = self.get(proposal_id)
         if row['status'] != 'tested':
@@ -418,8 +418,8 @@ def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str,
         project = self.manager.get(row['project_id'])
         if project is None:
             raise WorkspaceError('Project no longer exists')
-        if confirmation != project.name:
-            raise WorkspaceError('Type the exact project name to confirm application')
+        if approved is not True:
+            raise WorkspaceError('Explicit approval is required to apply changes')
         if project.kind.value == 'existing' and not allow_existing:
             raise WorkspaceError('Existing projects require explicit write authorization')
         root = project.path

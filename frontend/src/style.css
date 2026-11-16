@@ -90,10 +90,6 @@
 .chat-composer textarea{width:100%;resize:vertical;min-height:66px;max-height:180px;background:transparent;border:0;outline:0;color:#e5ecfa;font:12px/1.5 inherit;padding:3px;box-sizing:border-box}
 .chat-composer-bottom{display:flex;align-items:center;justify-content:space-between;color:#8194b2;font-size:10px}
 .chat-composer-bottom button{display:flex;align-items:center;justify-content:center;border:0;background:#765cde;color:#fff;width:29px;height:29px;border-radius:8px;cursor:pointer}.chat-composer-bottom button:disabled{opacity:.45}
-.chat-modal-backdrop{position:fixed;inset:0;z-index:200;background:#060b15bb;display:flex;align-items:center;justify-content:center;padding:18px}
-.chat-modal{width:min(420px,100%);background:#172337;border:1px solid #465879;border-radius:12px;padding:22px;box-shadow:0 20px 60px #0009;display:flex;flex-direction:column;gap:14px}
-.chat-modal h3{font-size:17px;margin:0}.chat-modal p{color:#b2c3db;line-height:1.5;margin:0}.chat-modal input:not([type=checkbox]){width:100%;padding:10px;border-radius:6px;background:#0d1624;color:#fff;border:1px solid #516481;box-sizing:border-box}
-.chat-modal label{display:flex;align-items:center;gap:8px;font-size:11px}.chat-modal-actions{display:flex;justify-content:flex-end;gap:10px}.chat-modal-actions>button:first-child{background:transparent;border:1px solid #465879;border-radius:7px;color:#d6e2f4;padding:9px 12px;cursor:pointer}
 .chat-spin{animation:chat-spin 1s linear infinite}@keyframes chat-spin{to{transform:rotate(360deg)}}
 .studio-xterm{position:relative;padding:5px 10px}.studio-xterm-surface{flex:1;min-height:0;overflow:hidden}.studio-xterm-surface .xterm{height:100%}.studio-xterm-hint{font-size:10px;color:#9cb0cb;padding:3px}
 
@@ -108,3 +104,10 @@
 
 .chat-context-required{flex-direction:column;align-items:stretch;min-width:0;color:inherit;overflow-wrap:anywhere}
 .chat-context-required .chat-secondary-action{margin:4px 0 0;width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:normal;flex-shrink:0}
+
+/* Inline agent approvals */
+.chat-action-text{font-size:12px;line-height:1.55;color:#d6e2f4;margin:8px 0 4px;overflow-wrap:anywhere}
+.chat-command-card{background:#172337;border:1px solid #35445e;border-radius:8px;padding:9px;display:flex;flex-direction:column;gap:7px;min-width:0}
+.chat-command-title{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#d6e2f4}.chat-command-title svg{color:#a99af5}.chat-command-title small{margin-left:auto;color:#91a2bc;font-weight:400}
+.chat-command-card pre{margin:0;padding:8px;background:#0d1624;border-radius:5px;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;color:#e2e8f0}.chat-command-card p{margin:0;color:#aabbd2;font-size:10px;line-height:1.5}
+.chat-inline-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.chat-inline-primary,.chat-inline-muted{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:5px 9px;border-radius:5px;cursor:pointer;border:1px solid transparent;color:#e2e8f0;background:transparent}.chat-inline-primary{background:#6352c4;border-color:#7564d5}.chat-inline-primary:hover{background:#7564d5}.chat-inline-muted:hover{background:#263650}.chat-inline-primary:disabled,.chat-inline-muted:disabled{opacity:.45;cursor:not-allowed}.chat-inline-status{display:flex;align-items:center;gap:6px;font-size:11px;color:#aabbd2;margin:6px 0;flex-wrap:wrap}

@@ -116,8 +116,11 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_pa
     assert tested.json()['status'] == 'tested'
     assert chosen == ['maven' if manifest == 'pom.xml' else 'gradle']
     assert file.read_text() == 'original source'
+    for body, status in [({}, 422), ({'approved': False, 'allow_existing': True}, 409), ({'approved': 'true', 'allow_existing': True}, 422), ({'approved': True}, 409)]:
+        assert client.post(f'/api/proposals/{proposal_id}/apply', json=body).status_code == status
+        assert file.read_text() == 'original source'
     applied = client.post(f'/api/proposals/{proposal_id}/apply', json={
-        'confirmation': project['name'], 'allow_existing': True})
+        'approved': True, 'allow_existing': True})
     assert applied.status_code == 200, applied.text
     assert file.read_text() == 'revised source'
 
@@ -149,5 +152,5 @@ def test_tampered_workspace_cannot_be_applied(tmp_path, monkeypatch):
                        'size': 26, 'diff': ''}]), tree_digest(workspace)))
     (workspace / 'main.py').write_text('tampered after test')
     with pytest.raises(WorkspaceError, match='changed after testing'):
-        service.apply(proposal_id, 'example')
+        service.apply(proposal_id, True)
     assert not (project.path / 'main.py').exists()

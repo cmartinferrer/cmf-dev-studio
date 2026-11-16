@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, status, WebSocket
 from cmf_dev_studio.api.terminal import terminal_socket
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 
 from cmf_dev_studio.projects import Project, ProjectLanguage, ProjectManager
 from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
@@ -238,8 +238,8 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     class ApplyRequest(BaseModel):
-        confirmation: str
-        allow_existing: bool = False
+        approved: StrictBool
+        allow_existing: StrictBool = False
 
     class TestApproval(BaseModel):
         approval: str
@@ -265,7 +265,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/proposals/{proposal_id}/apply")
     def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
         try:
-            return workspaces.apply(proposal_id, request.confirmation, request.allow_existing)
+            return workspaces.apply(proposal_id, request.approved, request.allow_existing)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:
