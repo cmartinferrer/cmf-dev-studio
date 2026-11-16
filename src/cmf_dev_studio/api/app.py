@@ -13,7 +13,7 @@ from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read
 from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError
 from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
 from cmf_dev_studio.projects.search import search_files
-from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict, rename_entry, delete_entry, entry_path
+from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict, rename_entry, delete_entry, entry_path, create_directory, move_entry, directory_path, safe_path, batch_entries, copy_entries
 from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
 
 
@@ -238,6 +238,47 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    class DirectoryRequest(BaseModel):
+        path: str = Field(min_length=1, max_length=500)
+        authorize_existing: StrictBool = False
+
+    class MoveRequest(DirectoryRequest):
+        parent: str = Field(max_length=500)
+
+    def protect_studio(target):
+        data = manager.data_dir.resolve()
+        if target == data or target in data.parents or data in target.parents:
+            raise ExplorerError("Protected Studio data")
+
+    @app.post("/api/projects/{project_id}/editor/directory")
+    def editor_create_directory(project_id: str, request: DirectoryRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        try:
+            if project.read_only:
+                protect_studio(safe_path(project.path, request.path, allow_missing=True))
+            return create_directory(project.path, request.path)
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.patch("/api/projects/{project_id}/editor/move")
+    def editor_move_entry(project_id: str, request: MoveRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        try:
+            source = entry_path(project.path, request.path)
+            destination = directory_path(project.path, request.parent) / source.name
+            if project.read_only:
+                protect_studio(source)
+                protect_studio(destination)
+            if source == destination:
+                return {"path": request.path}
+            return workspaces.move_resource(project_id, lambda: move_entry(project.path, request.path, request.parent))
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     @app.delete("/api/projects/{project_id}/editor/entry")
     def editor_delete_entry(project_id: str, request: EntryRequest) -> dict:
         project = editable_project(project_id, request.authorize_existing)
@@ -249,6 +290,40 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                 raise ExplorerError("Protected Studio data")
             return delete_entry(project.path, request.path)
         except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    class BatchEntryRequest(BaseModel):
+        paths: list[str] = Field(min_length=1, max_length=500)
+        parent: str | None = Field(default=None, max_length=500)
+        authorize_existing: StrictBool = False
+        confirmed: StrictBool = False
+
+    @app.post("/api/projects/{project_id}/editor/batch")
+    def editor_batch(project_id: str, request: BatchEntryRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        if request.parent is None and not request.confirmed:
+            raise HTTPException(status_code=400, detail="Confirmation required")
+        try:
+            return workspaces.move_resource(project_id, lambda: batch_entries(
+                project.path, request.paths, request.parent,
+                protect_studio if project.read_only else lambda target: None))
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/editor/copy")
+    def editor_copy(project_id: str, request: BatchEntryRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        if request.parent is None:
+            raise HTTPException(status_code=422, detail="Destination required")
+        try:
+            return workspaces.move_resource(project_id, lambda: copy_entries(
+                project.path, request.paths, request.parent,
+                protect_studio if project.read_only else lambda target: None))
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError, WorkspaceError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/insights")

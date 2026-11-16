@@ -181,6 +181,23 @@ class WorkspaceService:
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
                 kind TEXT NOT NULL, created_at TEXT NOT NULL, details TEXT NOT NULL)""")
 
+    def move_resource(self, project_id, operation):
+        """Invalidate pending proposals when the project layout changes."""
+        with _APPLY_LOCK:
+            with self._db() as db:
+                rows = db.execute("SELECT id,status FROM workspace_proposals WHERE project_id=? AND status IN ('queued','running','ready','tested','test_failed')", (project_id,)).fetchall()
+                if any(row['status'] in ('queued', 'running') for row in rows):
+                    raise WorkspaceError('Wait for the current AI operation before moving files')
+                result = operation()
+                for row in rows:
+                    pid = row['id']
+                    self._test_approvals.pop(pid, None)
+                    error = 'Project layout changed. Submit a new request.'
+                    db.execute("UPDATE workspace_proposals SET status='failed',error=?,tested_digest='' WHERE id=?", (error, pid))
+                    self._event(db, pid, 'layout_changed', error=error)
+                    self._event(db, pid, 'generation_cancelled')
+                return result
+
     @staticmethod
     def _event(db, proposal_id, kind, **details):
         db.execute('INSERT INTO proposal_events(proposal_id,kind,created_at,details) VALUES (?,?,?,?)',
@@ -295,6 +312,10 @@ class WorkspaceService:
         return [self.get(i) for i in ids]
 
     def submit(self, project_id: str, task: str, selected_paths: list[str], context_digest: str | None = None) -> dict:
+        with _APPLY_LOCK:
+            return self._submit(project_id, task, selected_paths, context_digest)
+
+    def _submit(self, project_id: str, task: str, selected_paths: list[str], context_digest: str | None = None) -> dict:
         project = self.manager.get(project_id)
         if project is None:
             raise KeyError('Project not found')

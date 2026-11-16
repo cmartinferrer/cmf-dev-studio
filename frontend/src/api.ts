@@ -63,3 +63,8 @@ export const renameEntry = (id:string,path:string,name:string,authorize_existing
 export const removeEntry = (id:string,path:string,authorize_existing:boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,authorize_existing,confirmed:true})});
 
 export const decideGeneration = (id:string, retry:boolean, contextPaths?:string[], contextDigest?:string|null) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/generation-decision`, {method:"POST",body:JSON.stringify({retry,context_paths:contextPaths,context_digest:contextDigest})});
+export const createDirectory = (id:string,path:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/directory`, {method:'POST',body:JSON.stringify({path,authorize_existing})});
+export const moveEntry = (id:string,path:string,parent:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/move`, {method:'PATCH',body:JSON.stringify({path,parent,authorize_existing})});
+export const batchEntries = (id:string,paths:string[],parent:string|null,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/batch`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing,confirmed:parent===null})});
+
+export const copyEntries = (id:string,paths:string[],parent:string,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/copy`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing})});

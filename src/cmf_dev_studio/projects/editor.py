@@ -124,3 +124,109 @@ def delete_entry(root: Path, relative: str) -> dict:
     else:
         target.unlink()
     return {'path': relative, 'deleted': True}
+
+
+def directory_path(root: Path, relative: str) -> Path:
+    target = root.resolve(strict=True) if relative == '' else entry_path(root, relative)
+    if not target.is_dir():
+        raise ExplorerError('Destination must be a directory')
+    return target
+
+
+def create_directory(root: Path, relative: str) -> dict:
+    if any(part in IGNORED for part in relative.split('/')) or '\x00' in relative:
+        raise ExplorerError('Protected or invalid path')
+    target = safe_path(root, relative, allow_missing=True)
+    if not target.parent.is_dir():
+        raise ExplorerError('Parent directory not found')
+    try:
+        target.mkdir()
+    except FileExistsError as exc:
+        raise EditConflict('Destination already exists') from exc
+    return {'path': relative}
+
+
+def move_entry(root: Path, relative: str, parent: str) -> dict:
+    source = entry_path(root, relative)
+    folder = directory_path(root, parent)
+    destination = folder / source.name
+    if destination == source:
+        return {'path': relative}
+    if source.is_dir() and (folder == source or source in folder.parents):
+        raise ExplorerError('Cannot move a folder into itself')
+    if destination.exists() or destination.is_symlink():
+        raise EditConflict('Destination already exists')
+    source.rename(destination)
+    return {'path': destination.relative_to(root.resolve()).as_posix()}
+
+
+def batch_entries(root: Path, paths: list[str], parent: str | None, protect=lambda target: None) -> dict:
+    """Preflight the entire selection; report completed operations on I/O failure."""
+    unique = sorted(set(paths))
+    sources = [(p, entry_path(root, p)) for p in unique]
+    sources = [(p, s) for p, s in sources if not any(p.startswith(q + '/') for q in unique)]
+    folder = directory_path(root, parent) if parent is not None else None
+    destinations = set()
+    for p, source in sources:
+        protect(source)
+        if folder is not None:
+            destination = folder / source.name
+            protect(destination)
+            if folder == source or source in folder.parents:
+                raise ExplorerError('Cannot move a folder into itself')
+            if destination in destinations or (destination != source and (destination.exists() or destination.is_symlink())):
+                raise EditConflict('Destination already exists')
+            destinations.add(destination)
+    completed = []
+    for p, source in sources:
+        try:
+            result = delete_entry(root, p) if parent is None else move_entry(root, p, parent)
+            completed.append({'source': p, 'path': result['path']})
+        except (OSError, ExplorerError, ValueError) as exc:
+            return {'completed': completed, 'error': str(exc)}
+    return {'completed': completed, 'error': None}
+
+
+def copy_entries(root: Path, paths: list[str], parent: str, protect=lambda target: None) -> dict:
+    """Copy saved resources without overwriting or following symbolic links."""
+    unique = sorted(set(paths))
+    sources = [(p, entry_path(root, p)) for p in unique]
+    sources = [(p, s) for p, s in sources if not any(p.startswith(q + '/') for q in unique)]
+    folder = directory_path(root, parent)
+    planned = []
+    destinations = set()
+    for p, source in sources:
+        protect(source)
+        if folder == source or source in folder.parents:
+            raise ExplorerError('Cannot copy a folder into itself')
+        destination = folder / source.name
+        if destination.exists() or destination.is_symlink() or destination in destinations:
+            stem, suffix = (source.stem, source.suffix) if source.is_file() else (source.name, '')
+            n = 1
+            while destination.exists() or destination.is_symlink() or destination in destinations:
+                destination = folder / f'{stem} ({n}){suffix}'
+                n += 1
+        protect(destination)
+        if destination in destinations or destination.exists() or destination.is_symlink():
+            raise EditConflict('Destination already exists')
+        destinations.add(destination)
+        if source.is_dir():
+            for child in source.rglob('*'):
+                protect(child)
+                if child.is_symlink() or not (child.is_file() or child.is_dir()):
+                    raise ExplorerError('Unsupported entry inside folder')
+                if child.name.startswith('.') or child.name in IGNORED:
+                    raise ExplorerError('Protected entry inside folder')
+        planned.append((p, source, destination))
+    completed = []
+    for p, source, destination in planned:
+        try:
+            if source.is_dir():
+                shutil.copytree(source, destination, symlinks=True)
+            else:
+                with source.open('rb') as src, destination.open('xb') as dst:
+                    shutil.copyfileobj(src, dst)
+            completed.append({'source': p, 'path': destination.relative_to(root.resolve()).as_posix()})
+        except (OSError, ExplorerError, ValueError) as exc:
+            return {'completed': completed, 'error': str(exc)}
+    return {'completed': completed, 'error': None}
