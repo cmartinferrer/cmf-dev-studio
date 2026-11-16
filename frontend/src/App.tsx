@@ -1,12 +1,16 @@
+import ResourceActions, { type ResourceTarget } from './ResourceActions';
+import { renameProject, removeProject } from './api';
 import ProjectLanguageIcon from './ProjectLanguageIcon';
 import FolderPicker from './FolderPicker';
 import IDEWorkspace from './IDEWorkspace';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowRight, Bot, CheckCircle2, ChevronDown, Code2, FileCode2, FolderOpen, GitBranch, LayoutGrid, Plus, RefreshCw, Search, ShieldCheck, Terminal, X } from 'lucide-react';
 import { createProject, listProjects, registerProject, projectLanguageLabels, type ProjectLanguage, type Project } from './api';
 
 type Mode = 'create' | 'register';
 export default function App() {
+  const dirtyRef=useRef(false);
+  const [resource,setResource]=useState<ResourceTarget|null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<Mode | null>(null);
@@ -40,6 +44,10 @@ export default function App() {
     } catch (err) { setFormError(err instanceof Error ? err.message : 'Unable to save project'); }
     finally { setBusy(false); }
   }
+  function projectMenu(e:React.MouseEvent,p:Project){
+    e.preventDefault();e.stopPropagation();
+    setResource({name:p.name,x:e.clientX,y:e.clientY,removeLabel:p.kind==='managed'?'Delete project':'Remove project',warning:p.kind==='managed'?`Permanently delete ${p.name} and all its files?`:`Remove ${p.name} from Studio? Its files will remain on disk.`,rename:async name=>{const updated=await renameProject(p.id,name);setProjects(old=>old.map(item=>item.id===p.id?updated:item));},remove:async()=>{if(selected===p.id&&dirtyRef.current)throw new Error("Save or close unsaved files first");await removeProject(p.id);setProjects(old=>old.filter(item=>item.id!==p.id));if(selected===p.id){setSelected(null);setApprovedContext([]);setApprovedDigest(null);}}});
+  }
   const filtered = projects.filter(p => `${p.name} ${p.description} ${p.path}`.toLowerCase().includes(search.toLowerCase()));
   return <div className="app">
     <aside className="sidebar">
@@ -47,7 +55,7 @@ export default function App() {
       <div className="nav-label">WORKSPACE</div>
       <button className={`nav-item ${!active ? 'active' : ''}`} onClick={() => { setSelected(null); setApprovedContext([]); setApprovedDigest(null); }}><LayoutGrid size={17}/> Overview</button>
       <div className="nav-label projects-label">PROJECTS <button aria-label="Add project" title="New project" onClick={() => openModal('create')}><Plus size={16}/></button></div>
-      <div className="project-nav">{projects.map(p => <button key={p.id} className={`project-nav-item ${active?.id === p.id ? 'chosen' : ''}`} onClick={() => { setSelected(p.id); setApprovedContext([]); setApprovedDigest(null); }}><ProjectLanguageIcon language={p.language}/><span>{p.name}</span>{active?.id === p.id && <span className="nav-dot"/>}</button>)}</div>
+      <div className="project-nav">{projects.map(p => <button key={p.id} onContextMenu={e=>projectMenu(e,p)} className={`project-nav-item ${active?.id === p.id ? 'chosen' : ''}`} onClick={() => { setSelected(p.id); setApprovedContext([]); setApprovedDigest(null); }}><ProjectLanguageIcon language={p.language}/><span>{p.name}</span>{active?.id === p.id && <span className="nav-dot"/>}</button>)}</div>
       <div className="sidebar-bottom"><div className="sidebar-note"><ShieldCheck size={17}/><div><strong>Local workspace</strong><span>Projects stay on your machine</span></div></div><div className="sidebar-version"><span className="online-dot"/> API connected via localhost <span>v0.1.0</span></div></div>
     </aside>
     <main className="main">
@@ -57,10 +65,10 @@ export default function App() {
       {!active ? <>
         <div className="hero"><div className="eyebrow"><span className="sparkle">✦</span> YOUR DEVELOPMENT WORKSPACE</div><h1>Build with a team<br/>of <span>AI agents.</span></h1><p>Turn ideas into working software. Create a project, bring your existing code, and build iteratively with an autonomous team.</p><div className="hero-actions"><button className="primary" onClick={() => openModal('create')}><Plus size={17}/> New project</button><button className="secondary" onClick={() => openModal('register')}><FolderOpen size={17}/> Open existing project</button></div><div className="hero-deco"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><Bot size={70}/></div></div>
         <div className="section-heading"><div><h2>Your projects</h2><p>Pick up where you left off, or start something new.</p></div><div className="search-box"><Search size={16}/><input aria-label="Search projects" placeholder="Search projects..." value={search} onChange={e => setSearch(e.target.value)}/></div></div>
-        {loading ? <div className="empty">Loading projects…</div> : filtered.length ? <div className="cards">{filtered.map(p => <button key={p.id} className="project-card" onClick={() => { setSelected(p.id); setApprovedContext([]); setApprovedDigest(null); }}><div className="card-top"><span className={`file-icon ${p.kind}`}><ProjectLanguageIcon language={p.language} size={22}/></span><span className="card-arrow"><ArrowRight size={18}/></span></div><strong>{p.name}</strong><p>{p.description || (p.kind === 'existing' ? 'Existing local project' : 'New managed project')}</p><div className="card-footer"><span className="type-tag">{p.kind === 'existing' ? 'Existing · Read only' : 'Managed'} · {projectLanguageLabels[p.language]}</span><span>{new Date(p.created_at).toLocaleDateString()}</span></div></button>)}</div> : <div className="empty"><FolderOpen size={28}/><strong>{search ? 'No matching projects' : 'No projects yet'}</strong><p>{search ? 'Try a different search.' : 'Create your first project or register an existing folder to get started.'}</p></div>}
+        {loading ? <div className="empty">Loading projects…</div> : filtered.length ? <div className="cards">{filtered.map(p => <button key={p.id} onContextMenu={e=>projectMenu(e,p)} className="project-card" onClick={() => { setSelected(p.id); setApprovedContext([]); setApprovedDigest(null); }}><div className="card-top"><span className={`file-icon ${p.kind}`}><ProjectLanguageIcon language={p.language} size={22}/></span><span className="card-arrow"><ArrowRight size={18}/></span></div><strong>{p.name}</strong><p>{p.description || (p.kind === 'existing' ? 'Existing local project' : 'New managed project')}</p><div className="card-footer"><span className="type-tag">{p.kind === 'existing' ? 'Existing · Read only' : 'Managed'} · {projectLanguageLabels[p.language]}</span><span>{new Date(p.created_at).toLocaleDateString()}</span></div></button>)}</div> : <div className="empty"><FolderOpen size={28}/><strong>{search ? 'No matching projects' : 'No projects yet'}</strong><p>{search ? 'Try a different search.' : 'Create your first project or register an existing folder to get started.'}</p></div>}
         <div className="bottom-section"><div className="section-heading"><div><h2>Your agent team</h2><p>Available in each project workspace.</p></div><span className="soon">READY</span></div><div className="agent-grid"><div className="agent"><div className="agent-icon analyst"><Search size={20}/></div><div><strong>Analyst</strong><p>Breaks down requirements</p></div></div><div className="agent"><div className="agent-icon developer"><Code2 size={20}/></div><div><strong>Developer</strong><p>Writes and improves code</p></div></div><div className="agent"><div className="agent-icon tester"><CheckCircle2 size={20}/></div><div><strong>Tester</strong><p>Validates the solution</p></div></div></div></div>
       </> : <>
-        <IDEWorkspace key={active.id} project={active} onProjectUpdated={updated => setProjects(current => current.map(p => p.id === updated.id ? updated : p))} approved={approvedContext} digest={approvedDigest} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} />
+        <IDEWorkspace key={active.id} project={active} onDirtyChange={dirty=>{dirtyRef.current=dirty;}} onProjectUpdated={updated => setProjects(current => current.map(p => p.id === updated.id ? updated : p))} approved={approvedContext} digest={approvedDigest} onApprove={(paths, digest) => { setApprovedContext(paths); setApprovedDigest(digest); }} />
       </>}
       </div>
     </main>
@@ -71,6 +79,7 @@ export default function App() {
     <label>Description <small>(optional)</small><textarea maxLength={2000} rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder="What are you building?"/></label>
     {formError && <div className="form-error" role="alert">{formError}</div>}
     <div className="dialog-footer"><button type="button" className="secondary" onClick={() => setModal(null)} disabled={busy}>Cancel</button><button type="submit" className="primary" disabled={busy}>{busy ? 'Saving…' : modal === 'create' ? 'Create project' : 'Register project'} <ArrowRight size={16}/></button></div></form></div></div>}
+    {resource&&<ResourceActions target={resource} onClose={()=>setResource(null)}/>}
     {pickerOpen && <FolderPicker onClose={() => setPickerOpen(false)} onSelect={selectedPath => { setPath(selectedPath); setPickerOpen(false); }}/>}
   </div>;
 }

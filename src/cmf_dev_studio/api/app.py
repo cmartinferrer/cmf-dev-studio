@@ -13,7 +13,7 @@ from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read
 from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError
 from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
 from cmf_dev_studio.projects.search import search_files
-from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict
+from cmf_dev_studio.projects.editor import read_editable, write_editable, delete_editable, EditConflict, rename_entry, delete_entry, entry_path
 from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
 
 
@@ -105,6 +105,33 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
 
+    class RenameProjectRequest(BaseModel):
+        name: str = Field(min_length=1, max_length=80)
+
+    @app.patch("/api/projects/{project_id}/name", response_model=ProjectResponse)
+    def rename_project(project_id: str, request: RenameProjectRequest) -> ProjectResponse:
+        try:
+            project = manager.rename(project_id, request.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return _response(project)
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(project_id: str, confirmed: bool = False) -> dict:
+        if not confirmed:
+            raise HTTPException(status_code=400, detail="Confirmation required")
+        if any(p['status'] in ('queued', 'running', 'generating', 'repairing') for p in workspaces.list(project_id)):
+            raise HTTPException(status_code=409, detail="Wait for the active AI operation")
+        try:
+            deleted = manager.delete(project_id)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return {"deleted": True}
+
     @app.get("/api/local/directories")
     def local_directories(path: str = "") -> dict:
         try:
@@ -189,6 +216,38 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             return delete_editable(project.path, request.path, request.expected_sha256)
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    class EntryRequest(BaseModel):
+        path: str = Field(min_length=1, max_length=500)
+        name: str | None = None
+        authorize_existing: StrictBool = False
+        confirmed: StrictBool = False
+
+    @app.patch("/api/projects/{project_id}/editor/entry")
+    def editor_rename_entry(project_id: str, request: EntryRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        try:
+            target = entry_path(project.path, request.path)
+            if project.read_only and (target == manager.data_dir or target in manager.data_dir.parents or manager.data_dir in target.parents):
+                raise ExplorerError("Protected Studio data")
+            return rename_entry(project.path, request.path, request.name or '')
+        except EditConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ExplorerError, OSError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}/editor/entry")
+    def editor_delete_entry(project_id: str, request: EntryRequest) -> dict:
+        project = editable_project(project_id, request.authorize_existing)
+        if not request.confirmed:
+            raise HTTPException(status_code=400, detail="Confirmation required")
+        try:
+            target = entry_path(project.path, request.path)
+            if project.read_only and (target == manager.data_dir or target in manager.data_dir.parents or manager.data_dir in target.parents):
+                raise ExplorerError("Protected Studio data")
+            return delete_entry(project.path, request.path)
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

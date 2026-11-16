@@ -467,6 +467,8 @@ def _checked_target(root: Path, path: str) -> Path:
 
 def _test_details(self: WorkspaceService, proposal_id: str) -> dict:
     row = self.get(proposal_id)
+    if self.manager.get(row['project_id']) is None:
+        raise WorkspaceError('Project no longer exists')
     if row['status'] not in ('ready', 'tested', 'test_failed'):
         raise WorkspaceError('Proposal must be ready before testing')
     workspace = self.root / proposal_id

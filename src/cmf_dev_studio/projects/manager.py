@@ -4,6 +4,7 @@ No agents are invoked and no existing project files are changed here.
 """
 
 import re
+import shutil
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,3 +117,26 @@ class ProjectManager:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()
         return [self._from_row(row) for row in rows]
+
+    def rename(self, project_id: str, name: str) -> Project | None:
+        """Rename display metadata without moving the workspace."""
+        name = self._validate_name(name)
+        with self._connect() as db:
+            db.execute("UPDATE projects SET name=? WHERE id=?", (name, project_id))
+        return self.get(project_id)
+
+    def delete(self, project_id: str) -> bool:
+        """Unregister external projects; remove only owned managed directories."""
+        project = self.get(project_id)
+        if project is None:
+            return False
+        if project.kind == ProjectKind.MANAGED:
+            root = self.managed_dir.resolve()
+            path = project.path
+            if self.managed_dir.is_symlink() or path.parent != root or path.is_symlink() or path.resolve() != path:
+                raise ValueError("Unsafe managed workspace path")
+            if path.exists():
+                shutil.rmtree(path)
+        with self._connect() as db:
+            db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        return True

@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
-from .explorer import ExplorerError, MAX_BYTES, _target
+from .explorer import ExplorerError, MAX_BYTES, IGNORED, _target
 
 
 class EditConflict(ExplorerError):
@@ -90,4 +91,36 @@ def delete_editable(root: Path, relative: str, expected_sha256: str) -> dict:
     if not expected_sha256 or digest(target.read_bytes()) != expected_sha256:
         raise EditConflict('File changed on disk. Reload before deleting.')
     target.unlink()
+    return {'path': relative, 'deleted': True}
+
+
+def entry_path(root: Path, relative: str) -> Path:
+    """Resolve a visible file or directory without following symbolic links."""
+    if any(part in IGNORED for part in relative.split('/')):
+        raise ExplorerError('Protected path')
+    target = safe_path(root, relative, allow_missing=True)
+    if not (target.is_file() or target.is_dir()):
+        raise ExplorerError('Entry not found')
+    return target
+
+
+def rename_entry(root: Path, relative: str, name: str) -> dict:
+    target = entry_path(root, relative)
+    if not name or name != name.strip() or name.startswith('.') or name in IGNORED or any(c in name for c in ('/', '\\', '\x00')):
+        raise ExplorerError('Invalid entry name')
+    destination = target.with_name(name)
+    if destination == target:
+        return {'path': relative}
+    if destination.exists() or destination.is_symlink():
+        raise EditConflict('Destination already exists')
+    target.rename(destination)
+    return {'path': destination.relative_to(root.resolve()).as_posix()}
+
+
+def delete_entry(root: Path, relative: str) -> dict:
+    target = entry_path(root, relative)
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
     return {'path': relative, 'deleted': True}

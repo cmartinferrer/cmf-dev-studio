@@ -56,3 +56,8 @@ export const previewProposalFile = (proposalId: string, path: string) => request
 export const deferProposal = (id:string, action:"tests"|"apply") => request<Proposal>(`/proposals/${encodeURIComponent(id)}/defer`, {method:"POST",body:JSON.stringify({action})});
 
 export const repairProposal = (id:string) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/repair`, {method:"POST"});
+
+export const renameProject = (id:string, name:string) => request<Project>(`/projects/${encodeURIComponent(id)}/name`, {method:'PATCH',body:JSON.stringify({name})});
+export const removeProject = (id:string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}?confirmed=true`, {method:'DELETE'});
+export const renameEntry = (id:string,path:string,name:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'PATCH',body:JSON.stringify({path,name,authorize_existing})});
+export const removeEntry = (id:string,path:string,authorize_existing:boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,authorize_existing,confirmed:true})});
