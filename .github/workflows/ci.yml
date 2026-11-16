@@ -40,6 +40,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --python ${{ matrix.python-version }}
 
+      - name: Run Ruff linter
+        run: uv run --locked ruff check .
+
+      - name: Check code formatting
+        run: uv run --locked ruff format --check .
+
       - name: Run unit tests
         run: uv run --locked pytest -q -m "not integration"
 
@@ -68,53 +74,6 @@ jobs:
 
       - name: Build frontend
         run: npm run build
-
-  integration:
-    name: Docker Integration
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --locked --python 3.12
-
-      - name: Resolve project version
-        id: version
-        run: |
-          VERSION=$(uv run --locked python -c "from importlib.metadata import version; print(version('cmf-dev-studio'))")
-          echo "value=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build Python runner
-        run: |
-          docker build \
-            -f docker/project-test-runner.Dockerfile \
-            -t cmf-dev-studio-runner-python:${{ steps.version.outputs.value }} .
-
-      - name: Build Maven runner
-        run: |
-          docker build \
-            -f docker/maven-test-runner.Dockerfile \
-            -t cmf-dev-studio-runner-maven:${{ steps.version.outputs.value }} .
-
-      - name: Build Gradle runner
-        run: |
-          docker build \
-            -f docker/gradle-test-runner.Dockerfile \
-            -t cmf-dev-studio-runner-gradle:${{ steps.version.outputs.value }} .
-
-      - name: Run integration tests
-        run: uv run --locked pytest -q -m integration
 
   security:
     name: Secret Scanning

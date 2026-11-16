@@ -10,6 +10,13 @@ class ProjectKind(str, Enum):
     EXISTING = "existing"
 
 
+class ProjectLanguage(str, Enum):
+    AUTO = "auto"
+    PYTHON = "python"
+    JAVA = "java"
+    KOTLIN = "kotlin"
+
+
 @dataclass(frozen=True)
 class Project:
     id: str
@@ -18,6 +25,7 @@ class Project:
     kind: ProjectKind
     description: str
     created_at: str
+    language: ProjectLanguage = ProjectLanguage.AUTO
 
     @property
     def read_only(self) -> bool:

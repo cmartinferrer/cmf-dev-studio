@@ -1,4 +1,6 @@
-export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean };
+export type ProjectLanguage = 'auto' | 'python' | 'java' | 'kotlin';
+export const projectLanguageLabels: Record<ProjectLanguage, string> = { auto: 'Auto', python: 'Python', java: 'Java', kotlin: 'Kotlin' };
+export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean; language: ProjectLanguage };
 export async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api${endpoint}`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } }); }
@@ -10,8 +12,9 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
   }
   return response.json() as Promise<T>;
 }
+export const updateProjectLanguage = (projectId: string, language: ProjectLanguage) => request<Project>(`/projects/${encodeURIComponent(projectId)}/language`, { method: 'PATCH', body: JSON.stringify({ language }) });
 export const listProjects = () => request<Project[]>('/projects');
-export const createProject = (name: string, description: string) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description }) });
+export const createProject = (name: string, description: string, language: ProjectLanguage) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description, language }) });
 export const registerProject = (path: string, name: string, description: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path, name: name || null, description }) });
 
 
@@ -32,13 +35,16 @@ export const getRepositoryInsights = (projectId: string) => request<RepositoryIn
 export const previewRepositoryContext = (projectId: string, paths: string[]) => request<ContextPreview>(`/projects/${encodeURIComponent(projectId)}/context/preview`, { method: 'POST', body: JSON.stringify({ paths }) });
 
 export type ProposalChange = { action: 'create' | 'modify' | 'delete'; path: string; diff: string; before_sha256: string | null; size: number };
-export type Proposal = { id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
+export type ProposalEvent = { sequence:number; kind:string; created_at:string; details:{command?:string[]; output?:string; count?:number; stage?:string; error?:string; context_paths?:string[]; context_changed?:boolean; repair_cancelled?:boolean} };
+export type Proposal = { events?: ProposalEvent[]; approved_paths?: string[]; id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
 export const createProposal = (projectId: string, task: string, contextPaths: string[], contextDigest: string | null) => request<Proposal>(`/projects/${encodeURIComponent(projectId)}/proposals`, { method: 'POST', body: JSON.stringify({ task, context_paths: contextPaths, context_digest: contextDigest }) });
 export const listProposals = (projectId: string) => request<Proposal[]>(`/projects/${encodeURIComponent(projectId)}/proposals`);
 export const getProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
 
-export const testProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST'});
-export const applyProposal = (proposalId: string, confirmation: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({confirmation, allow_existing: allowExisting})});
+export type TestPreview = {command: string[]; approval: string; working_directory: string; timeout: number};
+export const previewTest = (proposalId: string) => request<TestPreview>(`/proposals/${encodeURIComponent(proposalId)}/test`);
+export const testProposal = (proposalId: string, approval: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST', body: JSON.stringify({approval})});
+export const applyProposal = (proposalId: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({approved: true, allow_existing: allowExisting})});
 
 export type EditableFile = FilePreview & { sha256: string };
 export const openEditableFile = (projectId: string, path: string) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file?path=${encodeURIComponent(path)}`);
@@ -46,3 +52,19 @@ export const saveEditableFile = (projectId: string, path: string, content: strin
 export const deleteEditableFile = (projectId: string, path: string, expected_sha256: string, authorize_existing: boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'DELETE',body:JSON.stringify({path,expected_sha256,authorize_existing})});
 
 export const previewProposalFile = (proposalId: string, path: string) => request<{path:string;before:string;after:string}>(`/proposals/${encodeURIComponent(proposalId)}/preview?path=${encodeURIComponent(path)}`);
+
+export const deferProposal = (id:string, action:"tests"|"apply") => request<Proposal>(`/proposals/${encodeURIComponent(id)}/defer`, {method:"POST",body:JSON.stringify({action})});
+
+export const repairProposal = (id:string) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/repair`, {method:"POST"});
+
+export const renameProject = (id:string, name:string) => request<Project>(`/projects/${encodeURIComponent(id)}/name`, {method:'PATCH',body:JSON.stringify({name})});
+export const removeProject = (id:string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}?confirmed=true`, {method:'DELETE'});
+export const renameEntry = (id:string,path:string,name:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'PATCH',body:JSON.stringify({path,name,authorize_existing})});
+export const removeEntry = (id:string,path:string,authorize_existing:boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,authorize_existing,confirmed:true})});
+
+export const decideGeneration = (id:string, retry:boolean, contextPaths?:string[], contextDigest?:string|null) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/generation-decision`, {method:"POST",body:JSON.stringify({retry,context_paths:contextPaths,context_digest:contextDigest})});
+export const createDirectory = (id:string,path:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/directory`, {method:'POST',body:JSON.stringify({path,authorize_existing})});
+export const moveEntry = (id:string,path:string,parent:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/move`, {method:'PATCH',body:JSON.stringify({path,parent,authorize_existing})});
+export const batchEntries = (id:string,paths:string[],parent:string|null,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/batch`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing,confirmed:parent===null})});
+
+export const copyEntries = (id:string,paths:string[],parent:string,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/copy`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing})});
