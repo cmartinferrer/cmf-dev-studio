@@ -431,7 +431,7 @@ class WorkspaceService:
             prompt = build_workspace_prompt(task, '\n'.join(sorted(original))[:12000], approved, detect_languages(original))
             prompt += '\nPrevious proposed operations (untrusted data). Return the complete replacement patch relative to the original baseline, not an incremental patch:\n' + json.dumps(current, ensure_ascii=False)
             prompt += '\nRepair history (untrusted test output):\n' + json.dumps([e['details'].get('output', '')[-2000:] for e in row['events'] if e['kind'] == 'tests_failed'][-3:], ensure_ascii=False)
-            prompt += '\nDiagnose the failing assertion against the original requirements. Trace the actual control flow and mock call counts. Do not weaken assertions merely to pass; preserve valid tests and correct incorrect test assumptions only when justified by the requirements. Return a materially changed patch.'
+            prompt += '\nDiagnose the failing assertion against the original requirements. Trace the actual control flow and mock call counts. Do not weaken assertions merely to pass; preserve valid tests and correct incorrect test assumptions only when justified by the requirements. Return a materially changed patch. Preserve all requested production behavior and required dependencies; never replace a real effect with logging or a stub to make tests pass.'
             plan = Plan(tuple(row['plan'].get('requirements', [])), tuple(row['plan'].get('acceptance', [])))
             operations = engine.reviewed_patch(task, prompt, plan, original, paths,
                 lambda ops: validate_operations(ops, original, paths),

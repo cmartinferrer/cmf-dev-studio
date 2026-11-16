@@ -57,5 +57,31 @@ def acceptance_guidance() -> str:
         'Acceptance criteria must be externally observable and independent of implementation. '
         'Tests must assert concrete expected outputs from requirements or approved configuration, '
         'not compare an endpoint to the same helper used by its implementation. '
-        'Do not invent expected values when required configuration was not approved.'
+        'Do not invent expected values when required configuration was not approved. '
+        'Preserve every explicit user requirement, including real external effects and failure behavior. '
+        'A log message, stub, fake success or mock in production is not a substitute for a requested effect. '
+        'Use mocks only at test boundaries; verify the production path invokes the real integration. '
+        'Declare necessary runtime dependencies and report unavailable capabilities explicitly. '
+        'Prefer the simplest complete solution; do not add unrelated features.'
+    )
+
+
+def test_quality_guidance() -> str:
+    """Shared, language-independent test design and review policy."""
+    return (
+        'Map every testable acceptance criterion to a concrete behavioral assertion; '
+        'one test may cover multiple criteria. Verify actual values, persisted contents, '
+        'and relevant external calls with their arguments, counts and order when required. '
+        'For repeated behavior, exercise multiple iterations and controlled termination; '
+        'a single iteration cannot prove repetition. Cover relevant failure paths and '
+        'boundary cases without inventing requirements. Use deterministic clocks, scoped mocks '
+        'and temporary resources; restore global state even when assertions fail. '
+        'Do not mutate global module registries at test import time or use fixed shared output files. '
+        'Avoid real sleeps, network calls and hardware effects in unit tests; mock only external '
+        'boundaries, not the behavior under test. Distinguish unit tests from integration checks '
+        'that require an external environment. Ask whether removing a required behavior would '
+        'make a test fail; flag missing assertions, tautologies and swallowed unexpected errors. '
+        'During repair preserve valid assertions and coverage; correct a test only when its '
+        'expectation contradicts the original requirements. Prefer existing test conventions '
+        'and the smallest sufficient suite; no arbitrary coverage percentage or unrelated tests.'
     )

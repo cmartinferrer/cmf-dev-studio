@@ -32,7 +32,12 @@ from contextlib import contextmanager
 def fake_gemini(response):
     module = types.ModuleType('cmf_dev_studio.llm.gemini')
     class GeminiClient:
-        def generate(self, prompt): return response
+        def generate(self, prompt):
+            if 'ROLE: ANALYST' in prompt:
+                return json.dumps({'requirements': ['Implement requested change'], 'acceptance': ['Requested behavior works']})
+            if 'ROLE: TESTER' in prompt:
+                return json.dumps({'issues': []})
+            return response
     module.GeminiClient = GeminiClient
     with patch.dict(sys.modules, {'cmf_dev_studio.llm.gemini': module}):
         yield
