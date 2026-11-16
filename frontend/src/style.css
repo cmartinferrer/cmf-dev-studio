@@ -132,3 +132,7 @@
 .chat-dialog-author{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:600;color:#a99ae9}
 .chat-dialog-decision{font-size:12px;padding:6px 10px;max-width:90%}
 .chat-dialog .chat-history-command{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Project language icons retain their size in narrow navigation rows. */
+.project-language-icon{flex-shrink:0;display:inline-block;vertical-align:middle}
+.ide-project-title .project-language-icon{margin-right:6px}

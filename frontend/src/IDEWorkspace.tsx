@@ -20,6 +20,7 @@ loader.config({ monaco });
 import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode, Folder, FolderOpen, GitBranch, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react';
 import { projectLanguageLabels, deleteEditableFile, listProjectFiles, openEditableFile, saveEditableFile, previewProposalFile, type FileEntry, type Project, type ProposalChange } from './api';
 import AIChat from './AIChat';
+import ProjectLanguageIcon from './ProjectLanguageIcon';
 import RepositoryInsights from './RepositoryInsights';
 import TerminalPanel from './TerminalPanel';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare, SlidersHorizontal } from 'lucide-react';
@@ -93,7 +94,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
   }
   return <div className="ide-root ide-v32" style={{gridTemplateColumns:`${explorerVisible?`${explorerWidth}px 5px `:""}minmax(0,1fr)${assistantVisible?` 5px ${assistantWidth}px`:""}`}}>
     {explorerVisible&&<aside className="ide-explorer"><div className="ide-pane-title"><FolderOpen size={15}/> EXPLORER <button title="Refresh files" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={14}/></button><button title="New file" onClick={()=>setCreating(v=>!v)}><Plus size={15}/></button></div>
-      <div className="ide-project-title">{project.name} · {projectLanguageLabels[project.language]}</div>
+      <div className="ide-project-title"><ProjectLanguageIcon language={project.language} size={15}/>{project.name} · {projectLanguageLabels[project.language]}</div>
       {creating&&<div className="ide-new-file"><input autoFocus placeholder="src/new_file.py" value={createName} onChange={e=>setCreateName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')newFile();if(e.key==='Escape')setCreating(false);}}/><button onClick={newFile}>Create</button></div>}
       <div className="ide-tree"><FolderTree projectId={project.id} onOpen={p=>void open(p)} revision={revision}/></div>
       <div className="ide-explorer-bottom"><GitBranch size={14}/>{project.kind==='existing'?'Registered repository':'Managed workspace'}</div>
