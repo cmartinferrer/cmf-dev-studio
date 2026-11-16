@@ -120,3 +120,28 @@ def test_invalid_language_does_not_create_workspace(tmp_path):
         manager.create("Calculator", language="unsupported")
     assert manager.list_projects() == []
     assert list(manager.managed_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_update_language_preserves_project_and_files(tmp_path, existing):
+    """Changing language persists only registry metadata for either project kind."""
+    from dataclasses import replace
+
+    manager = ProjectManager(tmp_path / "studio")
+    if existing:
+        repository = tmp_path / "repo"
+        repository.mkdir()
+        project = manager.register_existing(repository)
+    else:
+        project = manager.create("Demo", language=ProjectLanguage.JAVA)
+    source = project.path / "source.txt"
+    source.write_text("unchanged\n")
+    for language in ProjectLanguage:
+        expected = replace(project, language=language)
+        assert manager.update_language(project.id, language) == expected
+        assert ProjectManager(manager.data_dir).get(project.id) == expected
+    assert source.read_text() == "unchanged\n"
+    assert list(project.path.iterdir()) == [source]
+    assert manager.update_language("missing", ProjectLanguage.JAVA) is None
+    with pytest.raises(ValueError):
+        manager.update_language(project.id, "invalid")

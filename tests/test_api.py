@@ -75,3 +75,23 @@ def test_project_language_http_contract(tmp_path):
         assert {p['language'] for p in client.get('/api/projects').json()} == {'python', 'java', 'kotlin'}
         assert client.post('/api/projects', json={'name': 'bad', 'language': 'invalid'}).status_code == 422
         assert client.post('/api/projects', json={'name': 'legacy'}).json()['language'] == 'auto'
+
+
+def test_update_project_language_http_contract(tmp_path):
+    """Language updates are validated, persisted and scoped to one project."""
+    data = tmp_path / "studio"
+    with TestClient(create_app(data)) as client:
+        project = client.post("/api/projects", json={"name": "Demo"}).json()
+        other = client.post("/api/projects", json={"name": "Other"}).json()
+        url = f"/api/projects/{project['id']}/language"
+        for language in ("java", "kotlin", "python", "auto"):
+            response = client.patch(url, json={"language": language})
+            assert response.status_code == 200
+            assert response.json() == {**project, "language": language}
+        for payload in ({}, {"language": None}, {"language": "invalid"}):
+            assert client.patch(url, json=payload).status_code == 422
+        assert client.patch("/api/projects/missing/language", json={"language": "java"}).status_code == 404
+        assert client.patch(url, json={"language": "kotlin"}).status_code == 200
+        assert client.get(f"/api/projects/{other['id']}").json() == other
+    with TestClient(create_app(data)) as client:
+        assert client.get(f"/api/projects/{project['id']}").json() == {**project, "language": "kotlin"}

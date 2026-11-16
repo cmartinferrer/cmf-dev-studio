@@ -34,6 +34,10 @@ class CreateProjectRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
 
 
+class UpdateProjectLanguageRequest(BaseModel):
+    language: ProjectLanguage
+
+
 class RegisterProjectRequest(BaseModel):
     path: str = Field(min_length=1)
     name: str | None = None
@@ -90,6 +94,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.get("/api/projects/{project_id}", response_model=ProjectResponse)
     def get_project(project_id: str) -> ProjectResponse:
         project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return _response(project)
+
+    @app.patch("/api/projects/{project_id}/language", response_model=ProjectResponse)
+    def update_project_language(project_id: str, request: UpdateProjectLanguageRequest) -> ProjectResponse:
+        project = manager.update_language(project_id, request.language)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)

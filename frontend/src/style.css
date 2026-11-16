@@ -136,3 +136,11 @@
 /* Project language icons retain their size in narrow navigation rows. */
 .project-language-icon{flex-shrink:0;display:inline-block;vertical-align:middle}
 .ide-project-title .project-language-icon{margin-right:6px}
+
+
+/* Shared workspace status bar: left metadata, right editor controls. */
+.ide-v32{grid-template-rows:minmax(0,1fr) 30px}
+.workspace-status-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;min-height:30px;padding:0 10px;background:#151f2e;border-top:1px solid #29374b;color:#a7b6cf;font-size:11px;position:relative;z-index:20;flex-shrink:0}
+.workspace-status-left,.workspace-status-right{display:flex;align-items:center;gap:7px;min-width:0}.workspace-status-left span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.workspace-language-control{position:relative;flex-shrink:0}.workspace-language-trigger{display:flex;align-items:center;gap:6px;background:transparent;border:0;border-radius:5px;color:#cbd5e1;padding:4px 8px;font-size:11px;line-height:16px}.workspace-language-trigger:hover,.workspace-language-trigger[aria-expanded=true]{background:#28354a;color:#f1f5f9}.workspace-language-trigger:focus-visible,.workspace-language-option:focus-visible{outline:2px solid #a78bfa;outline-offset:-2px}
+.workspace-language-menu{position:absolute;bottom:calc(100% + 8px);right:0;width:190px;background:#192335;border:1px solid #354158;border-radius:10px;padding:5px;box-shadow:0 10px 28px #0008;z-index:30}.workspace-language-heading{padding:7px 9px;color:#899bb6;font-size:10px;font-weight:600;letter-spacing:.03em}.workspace-language-option{display:flex;align-items:center;gap:9px;width:100%;padding:8px 9px;background:transparent;border:0;border-radius:6px;color:#dbe4f3;text-align:left;font-size:12px}.workspace-language-option:hover,.workspace-language-option:focus-visible{background:#28354a}.workspace-language-option[aria-checked=true]{background:#30294c}.workspace-language-check{margin-left:auto;color:#b5a4ff}

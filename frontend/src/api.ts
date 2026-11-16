@@ -12,6 +12,7 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
   }
   return response.json() as Promise<T>;
 }
+export const updateProjectLanguage = (projectId: string, language: ProjectLanguage) => request<Project>(`/projects/${encodeURIComponent(projectId)}/language`, { method: 'PATCH', body: JSON.stringify({ language }) });
 export const listProjects = () => request<Project[]>('/projects');
 export const createProject = (name: string, description: string, language: ProjectLanguage) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description, language }) });
 export const registerProject = (path: string, name: string, description: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path, name: name || null, description }) });

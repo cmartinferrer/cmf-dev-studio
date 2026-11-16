@@ -104,6 +104,14 @@ class ProjectManager:
             row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
         return self._from_row(row) if row else None
 
+    def update_language(self, project_id: str, language: ProjectLanguage) -> Project | None:
+        """Update registry metadata without touching the project's files."""
+        language = ProjectLanguage(language)
+        with self._connect() as db:
+            db.execute("UPDATE projects SET language = ? WHERE id = ?", (language.value, project_id))
+            row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        return self._from_row(row) if row else None
+
     def list_projects(self) -> list[Project]:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM projects ORDER BY created_at DESC, id DESC").fetchall()

@@ -17,16 +17,17 @@ import TsWorker from 'monaco-editor/language/typescript/ts.worker.js?worker';
   return new EditorWorker();
 } };
 loader.config({ monaco });
-import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode, Folder, FolderOpen, GitBranch, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react';
-import { projectLanguageLabels, deleteEditableFile, listProjectFiles, openEditableFile, saveEditableFile, previewProposalFile, type FileEntry, type Project, type ProposalChange } from './api';
+import { Bot, ChevronDown, ChevronRight, CircleAlert, FileCode, Folder, FolderOpen, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react';
+import { updateProjectLanguage, type ProjectLanguage, deleteEditableFile, listProjectFiles, openEditableFile, saveEditableFile, previewProposalFile, type FileEntry, type Project, type ProposalChange } from './api';
 import AIChat from './AIChat';
 import ProjectLanguageIcon from './ProjectLanguageIcon';
+import WorkspaceStatusBar from './WorkspaceStatusBar';
 import RepositoryInsights from './RepositoryInsights';
 import TerminalPanel from './TerminalPanel';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare, SlidersHorizontal } from 'lucide-react';
 
 type Tab = { path: string; content: string; saved: string; sha256: string | null; dirty: boolean; isNew: boolean };
-type Props = { project: Project; approved: string[]; digest: string | null; onApprove: (paths:string[],digest:string | null)=>void };
+type Props = { project: Project; onProjectUpdated: (project: Project) => void; approved: string[]; digest: string | null; onApprove: (paths:string[],digest:string | null)=>void };
 function language(path: string) { const ext=path.split('.').pop()?.toLowerCase(); return ({py:'python',ts:'typescript',tsx:'typescript',js:'javascript',jsx:'javascript',json:'json',md:'markdown',yaml:'yaml',yml:'yaml',toml:'ini',java:'java',kt:'kotlin',kts:'kotlin',xml:'xml',gradle:'groovy',html:'html',css:'css'} as Record<string,string>)[ext||''] || 'plaintext'; }
 function FolderTree({projectId, path='', depth=0, onOpen, revision}:{projectId:string;path?:string;depth?:number;onOpen:(path:string)=>void;revision:number}) {
   const [expanded,setExpanded]=useState(depth===0);
@@ -35,7 +36,15 @@ function FolderTree({projectId, path='', depth=0, onOpen, revision}:{projectId:s
   useEffect(()=>{if(!expanded)return;let cancelled=false;listProjectFiles(projectId,path).then(v=>{if(!cancelled){setItems(v.entries);setError('');}}).catch(e=>{if(!cancelled)setError(String(e));});return()=>{cancelled=true;};},[projectId,path,expanded,revision]);
   return <div>{depth>0&&<button className="ide-tree-row" style={{paddingLeft:depth*13}} onClick={()=>setExpanded(v=>!v)}>{expanded?<ChevronDown size={13}/>:<ChevronRight size={13}/>}<Folder size={14}/>{path.split('/').pop()}</button>}{expanded&&<>{error&&<small className="ide-error">{error}</small>}{items.map(item=>item.kind==='directory'?<FolderTree key={item.path} projectId={projectId} path={item.path} depth={depth+1} onOpen={onOpen} revision={revision}/>:<button key={item.path} className="ide-tree-row" style={{paddingLeft:(depth+1)*13+13}} title={item.path} onClick={()=>onOpen(item.path)}><FileCode size={14}/>{item.name}</button>)}</>}</div>;
 }
-export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
+export default function IDEWorkspace({project,approved,digest,onApprove,onProjectUpdated}:Props){
+  const [languageBusy,setLanguageBusy]=useState(false);
+  async function changeProjectLanguage(value: ProjectLanguage) {
+    if (languageBusy || value === project.language) return;
+    setLanguageBusy(true);
+    try { onProjectUpdated(await updateProjectLanguage(project.id,value)); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setLanguageBusy(false); }
+  }
   const [tabs,setTabs]=useState<Tab[]>([]);
   const [active,setActive]=useState<string|null>(null);
   const [side,setSide]=useState<'assistant'|'context'>('assistant');
@@ -94,10 +103,9 @@ export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
   }
   return <div className="ide-root ide-v32" style={{gridTemplateColumns:`${explorerVisible?`${explorerWidth}px 5px `:""}minmax(0,1fr)${assistantVisible?` 5px ${assistantWidth}px`:""}`}}>
     {explorerVisible&&<aside className="ide-explorer"><div className="ide-pane-title"><FolderOpen size={15}/> EXPLORER <button title="Refresh files" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={14}/></button><button title="New file" onClick={()=>setCreating(v=>!v)}><Plus size={15}/></button></div>
-      <div className="ide-project-title"><ProjectLanguageIcon language={project.language} size={15}/>{project.name} · {projectLanguageLabels[project.language]}</div>
+      <div className="ide-project-title"><ProjectLanguageIcon language={project.language} size={15}/>{project.name}</div>
       {creating&&<div className="ide-new-file"><input autoFocus placeholder="src/new_file.py" value={createName} onChange={e=>setCreateName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')newFile();if(e.key==='Escape')setCreating(false);}}/><button onClick={newFile}>Create</button></div>}
       <div className="ide-tree"><FolderTree projectId={project.id} onOpen={p=>void open(p)} revision={revision}/></div>
-      <div className="ide-explorer-bottom"><GitBranch size={14}/>{project.kind==='existing'?'Registered repository':'Managed workspace'}</div>
     </aside>}
     {explorerVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize explorer" onPointerDown={e=>startResize(e,"explorer")}/>}
     <section className="ide-center"><div className="ide-quickbar"><button title="Toggle explorer" onClick={()=>setExplorerVisible(v=>!v)}>{explorerVisible?<PanelLeftClose size={15}/>:<PanelLeftOpen size={15}/>}</button><span>{project.name}</span><div><button onClick={()=>setBottom(v=>!v)}><TerminalSquare size={14}/> Terminal</button><button title="Toggle AI assistant" onClick={()=>setAssistantVisible(v=>!v)}>{assistantVisible?<PanelRightClose size={15}/>:<PanelRightOpen size={15}/>}</button></div></div><div className="ide-tabs">{review&&<div className="ide-tab ide-tab-active"><button onClick={()=>{}}><FileCode size={14}/>Review: {review.path}</button><button title="Close review" onClick={()=>setReview(null)}><X size={13}/></button></div>}{tabs.map(t=><div key={t.path} className={`ide-tab ${t.path===active?'ide-tab-active':''}`}><button onClick={()=>setActive(t.path)}><FileCode size={14}/>{t.path.split('/').pop()}{t.dirty?' ●':''}</button><button title="Close tab" onClick={()=>close(t.path)}><X size={13}/></button></div>)}</div>
@@ -111,5 +119,6 @@ export default function IDEWorkspace({project,approved,digest,onApprove}:Props){
     {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant <button className="ide-advanced-toggle" onClick={()=>setShowAdvanced(v=>!v)} title="More AI tools"><SlidersHorizontal size={14}/></button></div>{showAdvanced&&<div className="ide-ai-switch ide-ai-switch-v32"><button className={side==='assistant'?'on':''} onClick={()=>setSide('assistant')}>Assistant</button><button className={side==='context'?'on':''} onClick={()=>setSide('context')}>Context</button></div>}
       <div className="ide-ai-content">{side==='assistant'?<AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} contextDigest={digest} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)} onContext={()=>{setSide('context');setShowAdvanced(true);}} onApproveContext={onApprove}/>:<RepositoryInsights projectId={project.id} approved={approved} onApprove={onApprove} onGoToProposals={()=>setSide('assistant')}/>}</div>
     </aside>}
+    <WorkspaceStatusBar key={project.id} project={project} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)}/>
   </div>;
 }
