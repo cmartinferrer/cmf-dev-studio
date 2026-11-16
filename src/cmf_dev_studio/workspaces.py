@@ -199,6 +199,41 @@ class WorkspaceService:
                 self._event(db, proposal_id, kind)
             return self.get(proposal_id)
 
+    def retry_generation(self, proposal_id: str, retry: bool = True, context_paths: list[str] | None = None, context_digest: str | None = None) -> dict:
+        """Retry original context or explicitly approve a replacement against the baseline."""
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            if row['status'] != 'failed' or any(e['kind'] == 'generation_cancelled' for e in row['events']):
+                raise WorkspaceError('Generation is not awaiting a retry decision')
+            if not retry:
+                with self._db() as db:
+                    self._event(db, proposal_id, 'generation_cancelled')
+                return self.get(proposal_id)
+            project = self.manager.get(row['project_id'])
+            baseline = self.baselines / proposal_id
+            if project is None or not baseline.is_dir():
+                raise WorkspaceError('Original project or proposal baseline unavailable')
+            from cmf_dev_studio.projects.intelligence import prepare_context
+            paths = row['approved_paths'] if context_paths is None else context_paths
+            if len(paths) > 8 or len(set(paths)) != len(paths):
+                raise WorkspaceError('Select at most 8 unique reference files')
+            context = prepare_context(project.path, paths)
+            if context_paths is not None and paths and context_digest != context['digest']:
+                raise WorkspaceError('Review and approve repository context before retrying')
+            original = {p.relative_to(baseline).as_posix(): p.read_bytes()
+                        for p in baseline.rglob('*') if p.is_file() and not p.is_symlink()}
+            if any(original.get(f['path']) != f['content'].encode('utf-8') for f in context['files']):
+                raise WorkspaceError('Approved context has changed; send a new request to approve it again')
+            with self._db() as db:
+                db.execute("UPDATE workspace_proposals SET status='queued',error='',agent_stage='',plan='{}' WHERE id=?", (proposal_id,))
+                # Preserve the original context for legacy requests before replacing it.
+                if not any('context_paths' in e['details'] for e in row['events'] if e['kind'] == 'requested'):
+                    db.execute("UPDATE proposal_events SET details=? WHERE proposal_id=? AND kind='requested'", (json.dumps({'context_paths': row['approved_paths']}), proposal_id))
+                db.execute('UPDATE workspace_proposals SET approved_paths=? WHERE id=?', (json.dumps(paths), proposal_id))
+                self._event(db, proposal_id, 'generation_retry_requested', context_paths=paths, context_changed=context_paths is not None)
+            Thread(target=self._generate, args=(proposal_id, row['task'], context, original), daemon=True).start()
+            return self.get(proposal_id)
+
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
         db.row_factory = sqlite3.Row
@@ -291,7 +326,7 @@ class WorkspaceService:
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as db:
             db.execute('INSERT INTO workspace_proposals(id,project_id,status,task,created_at,approved_paths) VALUES (?,?,?,?,?,?)', (proposal_id, project_id, 'queued', task, now, json.dumps(selected_paths)))
-            self._event(db, proposal_id, 'requested')
+            self._event(db, proposal_id, 'requested', context_paths=selected_paths)
         Thread(target=self._generate, args=(proposal_id, task, context, original), daemon=True).start()
         return self.get(proposal_id)
 
@@ -443,8 +478,8 @@ class WorkspaceService:
             self._update(proposal_id, 'ready', changes=changes)
             self._stage(proposal_id, 'awaiting_tests')
         except Exception as exc:
-            self._update(proposal_id, 'failed', error=f'{type(exc).__name__}: {str(exc)[:400]}')
             self._stage(proposal_id, 'failed')
+            self._update(proposal_id, 'failed', error=f'{type(exc).__name__}: {str(exc)[:400]}')
 
 # v2.2: verified application and isolated project-level test execution.
 import threading

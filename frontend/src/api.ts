@@ -35,8 +35,8 @@ export const getRepositoryInsights = (projectId: string) => request<RepositoryIn
 export const previewRepositoryContext = (projectId: string, paths: string[]) => request<ContextPreview>(`/projects/${encodeURIComponent(projectId)}/context/preview`, { method: 'POST', body: JSON.stringify({ paths }) });
 
 export type ProposalChange = { action: 'create' | 'modify' | 'delete'; path: string; diff: string; before_sha256: string | null; size: number };
-export type ProposalEvent = { sequence:number; kind:string; created_at:string; details:{command?:string[]; output?:string; count?:number; stage?:string; error?:string} };
-export type Proposal = { events?: ProposalEvent[]; id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
+export type ProposalEvent = { sequence:number; kind:string; created_at:string; details:{command?:string[]; output?:string; count?:number; stage?:string; error?:string; context_paths?:string[]; context_changed?:boolean} };
+export type Proposal = { events?: ProposalEvent[]; approved_paths?: string[]; id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
 export const createProposal = (projectId: string, task: string, contextPaths: string[], contextDigest: string | null) => request<Proposal>(`/projects/${encodeURIComponent(projectId)}/proposals`, { method: 'POST', body: JSON.stringify({ task, context_paths: contextPaths, context_digest: contextDigest }) });
 export const listProposals = (projectId: string) => request<Proposal[]>(`/projects/${encodeURIComponent(projectId)}/proposals`);
 export const getProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
@@ -61,3 +61,5 @@ export const renameProject = (id:string, name:string) => request<Project>(`/proj
 export const removeProject = (id:string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}?confirmed=true`, {method:'DELETE'});
 export const renameEntry = (id:string,path:string,name:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'PATCH',body:JSON.stringify({path,name,authorize_existing})});
 export const removeEntry = (id:string,path:string,authorize_existing:boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,authorize_existing,confirmed:true})});
+
+export const decideGeneration = (id:string, retry:boolean, contextPaths?:string[], contextDigest?:string|null) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/generation-decision`, {method:"POST",body:JSON.stringify({retry,context_paths:contextPaths,context_digest:contextDigest})});

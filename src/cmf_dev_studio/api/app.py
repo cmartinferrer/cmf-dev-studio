@@ -341,6 +341,20 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (WorkspaceError, OSError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    class GenerationDecision(BaseModel):
+        retry: StrictBool
+        context_paths: list[str] | None = Field(default=None, max_length=8)
+        context_digest: str | None = None
+
+    @app.post("/api/proposals/{proposal_id}/generation-decision")
+    def generation_decision(proposal_id: str, request: GenerationDecision) -> dict:
+        try:
+            return workspaces.retry_generation(proposal_id, request.retry, request.context_paths, request.context_digest)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     class DeferRequest(BaseModel):
         action: str
 
