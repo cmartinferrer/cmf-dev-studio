@@ -1,19 +1,28 @@
 import random
 import time
+
 from google import genai
 
 
 def _transient_error(exc: Exception) -> bool:
     """Retry only provider rate limits and temporary service failures."""
-    code = getattr(exc, 'code', None) or getattr(exc, 'status_code', None)
+    code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
     try:
         if int(code) in (429, 500, 502, 503, 504):
             return True
     except (ValueError, TypeError):
         pass
     message = str(exc).upper()
-    return any(marker in message for marker in ('429 RESOURCE_EXHAUSTED', '503 UNAVAILABLE', '500 INTERNAL', '502 BAD_GATEWAY', '504 DEADLINE_EXCEEDED'))
-
+    return any(
+        marker in message
+        for marker in (
+            "429 RESOURCE_EXHAUSTED",
+            "503 UNAVAILABLE",
+            "500 INTERNAL",
+            "502 BAD_GATEWAY",
+            "504 DEADLINE_EXCEEDED",
+        )
+    )
 
 
 class GeminiClient:
@@ -40,7 +49,7 @@ class GeminiClient:
             sdk_client: Optional SDK client for dependency injection.
         """
         if max_provider_attempts < 1 or retry_base_seconds < 0:
-            raise ValueError('Invalid provider retry settings')
+            raise ValueError("Invalid provider retry settings")
         self.max_provider_attempts = max_provider_attempts
         self.retry_base_seconds = retry_base_seconds
         self.model = model
@@ -61,7 +70,13 @@ class GeminiClient:
         return self._generate(prompt)
 
     def generate_json(self, prompt: str, schema: dict) -> str:
-        return self._generate(prompt, config={"response_mime_type": "application/json", "response_json_schema": schema})
+        return self._generate(
+            prompt,
+            config={
+                "response_mime_type": "application/json",
+                "response_json_schema": schema,
+            },
+        )
 
     def _generate(self, prompt: str, **kwargs) -> str:
         for attempt in range(self.max_provider_attempts):
@@ -73,9 +88,12 @@ class GeminiClient:
                 )
                 break
             except Exception as exc:
-                if not _transient_error(exc) or attempt + 1 == self.max_provider_attempts:
+                if (
+                    not _transient_error(exc)
+                    or attempt + 1 == self.max_provider_attempts
+                ):
                     raise
-                delay = self.retry_base_seconds * (2 ** attempt)
+                delay = self.retry_base_seconds * (2**attempt)
                 if delay:
                     time.sleep(delay + random.uniform(0, delay * 0.2))
 

@@ -1,22 +1,22 @@
-"""Conservative Docker test adapters selected by build manifest.
+"""Native test commands, executed only after proposal approval by the caller."""
 
-Execution has no network access and never mounts the original repository.
-Dependencies must be available in the prebuilt image/cache. Unsupported projects
-are never reported as tested.
-"""
 from __future__ import annotations
 
+import os
+import shutil
+import signal
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 
 @dataclass(frozen=True)
 class RunnerSpec:
     name: str
-    image: str
     command: tuple[str, ...]
-    timeout: int = 180
+    timeout: int = 300
 
 
 class UnsupportedRunner(ValueError):
@@ -24,81 +24,92 @@ class UnsupportedRunner(ValueError):
 
 
 def select_runner(workspace: Path) -> RunnerSpec:
-    paths = {p.relative_to(workspace).as_posix() for p in workspace.rglob('*') if p.is_file()}
-    if 'pom.xml' in paths:
-        if not any(p.startswith('src/test/') and p.endswith(('.java', '.kt')) for p in paths):
-            raise UnsupportedRunner('Maven project has no test sources; generate tests before verification')
-        return RunnerSpec('maven', 'cmf-dev-studio-runner-maven:0.1.0', ('mvn', '-o', '-B', 'test', '-DfailIfNoTests=true', '-Dstyle.color=never'), 240)
-    if 'build.gradle.kts' in paths or 'build.gradle' in paths:
-        if not any(p.startswith('src/test/') and p.endswith(('.java', '.kt')) for p in paths):
-            raise UnsupportedRunner('Gradle project has no test sources; generate tests before verification')
-        # Never execute a repository-provided gradlew shell script.
-        return RunnerSpec('gradle', 'cmf-dev-studio-runner-gradle:0.1.0', ('gradle', '--offline', '--no-daemon', 'test', '--console=plain'), 240)
-    if any(p.endswith('.py') for p in paths):
-        return RunnerSpec('pytest', 'cmf-dev-studio-runner-python:0.1.0', ('python', '-m', 'pytest', '-q', '-p', 'no:cacheprovider'), 120)
-    raise UnsupportedRunner('No supported test runner (Python/pytest, Java/Maven or Java/Kotlin/Gradle)')
+    paths = {
+        p.relative_to(workspace).as_posix() for p in workspace.rglob("*") if p.is_file()
+    }
+    if "pom.xml" in paths:
+        if not any(
+            p.startswith("src/test/") and p.endswith((".java", ".kt")) for p in paths
+        ):
+            raise UnsupportedRunner("Maven project has no test sources")
+        return RunnerSpec("maven", ("mvn", "-B", "test", "-DfailIfNoTests=true"))
+    if {"build.gradle.kts", "build.gradle"} & paths:
+        if not any(
+            p.startswith("src/test/") and p.endswith((".java", ".kt")) for p in paths
+        ):
+            raise UnsupportedRunner("Gradle project has no test sources")
+        return RunnerSpec(
+            "gradle", ("gradle", "test", "--console=plain", "--no-daemon")
+        )
+    if any(p.endswith(".py") for p in paths):
+        command = (
+            ("uv", "run", "--with", "pytest", "pytest", "-q")
+            if "pyproject.toml" in paths
+            else (sys.executable, "-m", "pytest", "-q")
+        )
+        return RunnerSpec("pytest", command)
+    raise UnsupportedRunner(
+        "No supported test runner (Python/pytest, Java/Maven or Java/Kotlin/Gradle)"
+    )
 
 
 def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
-    setup = ''
-    if spec.name == 'maven':
-        setup = 'export JAVA_TOOL_OPTIONS=-Duser.home=/tmp; mkdir -p /tmp/maven && cp -R /home/runner/.m2/repository /tmp/maven/ || exit 125; '
-    elif spec.name == 'gradle':
-        setup = 'export JAVA_TOOL_OPTIONS=-Duser.home=/tmp; mkdir -p /tmp/gradle && cp -R /home/runner/.gradle/caches /tmp/gradle/ || exit 125; export GRADLE_USER_HOME=/tmp/gradle; '
-    args = spec.command
-    if spec.name == 'maven':
-        args = (*args, '-Dmaven.repo.local=/tmp/maven/repository')
-    command = [
-        'docker', 'run', '--rm',
-        '--network', 'none',
-        '--read-only',
-        '--cap-drop', 'ALL',
-        '--security-opt', 'no-new-privileges',
-        '--pids-limit', '128',
-        '--memory', '1g',
-        '--cpus', '1',
-        '--user', '10001:10001',
-        '--tmpfs', '/tmp:rw,nosuid,mode=1777,size=' + ('768m' if spec.name in ('maven', 'gradle') else '128m'),
-        '--mount',
-        f'type=bind,src={workspace.resolve()},dst=/workspace,readonly',
-        '-w', '/tmp',
-        spec.image,
-        'sh', '-c',
-        'workdir=$(mktemp -d /tmp/studio-XXXXXX) || exit 125; '
-        'cp -R /workspace/. "$workdir/" || exit 125; '
-        'cd "$workdir" || exit 125; '
-        + setup + 'exec "$@"',
-        'studio-runner',
-        *args,
-    ]
-
+    # A disposable copy protects against ordinary build artifacts, not hostile code.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        in {
+            "PATH",
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "LANG",
+            "LC_ALL",
+            "JAVA_HOME",
+            "GRADLE_USER_HOME",
+            "SYSTEMROOT",
+            "TMPDIR",
+            "XDG_CACHE_HOME",
+        }
+    }
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=spec.timeout,
-            check=False,
-        )
-
-        output = (result.stdout + '\n' + result.stderr)[-16000:]
-
+        with TemporaryDirectory(prefix="cmf-test-") as directory:
+            root = Path(directory) / "project"
+            shutil.copytree(workspace, root)
+            with subprocess.Popen(
+                spec.command,
+                cwd=root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                errors="replace",
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            ) as process:
+                try:
+                    output, _ = process.communicate(timeout=spec.timeout)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+                    return (
+                        False,
+                        f"Runner: {spec.name} (infrastructure_error) timed out after {spec.timeout} seconds",
+                    )
+                code = process.returncode
         classification = (
-            'infrastructure_error'
-            if result.returncode in (125, 126, 127)
-            or (spec.name == 'pytest' and result.returncode in (3, 4))
-            or any(marker in output for marker in ('Could not resolve dependencies for project', 'No cached version', 'Cannot access central', 'Could not resolve all files for configuration', 'PluginResolutionException', 'has not been downloaded from it before', 'No cached version available'))
-            else 'test_result'
+            "infrastructure_error"
+            if code in (125, 126, 127) or (spec.name == "pytest" and code in (3, 4))
+            else "test_result"
         )
-
         return (
-            result.returncode == 0,
-            f'Runner: {spec.name} '
-            f'(exit {result.returncode}; {classification})\n{output}',
+            code == 0,
+            f"Runner: {spec.name} (exit {code}; {classification})\n{output[-16000:]}",
         )
-
-    except FileNotFoundError:
-        return False, 'Docker is not installed or not on PATH'
-
-    except subprocess.TimeoutExpired:
-        return False, f'{spec.name} timed out after {spec.timeout} seconds'
+    except OSError as exc:
+        return False, f"Runner: {spec.name} (infrastructure_error): {exc}"

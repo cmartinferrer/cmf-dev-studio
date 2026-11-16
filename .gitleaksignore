@@ -3,3 +3,5 @@
 
 14e46dc8f9dcd866d96fffc86a0840debdbe3425:tests/test_repository_intelligence.py:generic-api-key:82
 ea28b6229e43e81152a1428e5e28e8ab244389ba:tests/test_repository_intelligence.py:generic-api-key:25
+# Synthetic API key used to test repository secret detection.
+f325ff82c88b3d0a301d83be075add243407800b:tests/test_repository_intelligence.py:generic-api-key:29

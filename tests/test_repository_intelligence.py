@@ -1,84 +1,93 @@
 from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
-from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
-from cmf_dev_studio.projects.explorer import ExplorerError
 from cmf_dev_studio.api.app import create_app
+from cmf_dev_studio.projects.explorer import ExplorerError
+from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
 
 
 def test_inventory_is_bounded_and_ignores_secrets(tmp_path: Path):
-    (tmp_path / 'pyproject.toml').write_text('[project]\nname="example"')
-    (tmp_path / 'main.py').write_text('print("hi")')
-    (tmp_path / '.env').write_text('TOKEN=secret')
-    (tmp_path / 'password.py').write_text('private')
-    (tmp_path / 'secrets').mkdir()
-    (tmp_path / 'secrets' / 'other.py').write_text('private')
+    (tmp_path / "pyproject.toml").write_text('[project]\nname="example"')
+    (tmp_path / "main.py").write_text('print("hi")')
+    (tmp_path / ".env").write_text("TOKEN=secret")
+    (tmp_path / "password.py").write_text("private")
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / "other.py").write_text("private")
     info = analyze_repository(tmp_path)
-    assert info['technologies'] == ['Python / pyproject']
-    assert [entry['path'] for entry in info['candidates']] == ['main.py', 'pyproject.toml']
+    assert info["technologies"] == ["Python / pyproject"]
+    assert [entry["path"] for entry in info["candidates"]] == [
+        "main.py",
+        "pyproject.toml",
+    ]
 
 
 def test_explicit_selection_and_secret_scanning(tmp_path: Path):
-    (tmp_path / 'main.py').write_text('def add(a, b): return a+b')
-    (tmp_path / 'token.py').write_text('safe')
-    (tmp_path / 'bad.py').write_text('api_key = "abcdefgh123456"')
-    assert prepare_context(tmp_path, ['main.py'])['files'][0]['path'] == 'main.py'
+    (tmp_path / "main.py").write_text("def add(a, b): return a+b")
+    (tmp_path / "token.py").write_text("safe")
+    (tmp_path / "bad.py").write_text('api_key = "abcdefgh123456"')
+    assert prepare_context(tmp_path, ["main.py"])["files"][0]["path"] == "main.py"
     with pytest.raises(ExplorerError):
-        prepare_context(tmp_path, ['token.py'])
+        prepare_context(tmp_path, ["token.py"])
     with pytest.raises(ExplorerError):
-        prepare_context(tmp_path, ['bad.py'])
+        prepare_context(tmp_path, ["bad.py"])
     with pytest.raises(ExplorerError):
-        prepare_context(tmp_path, ['../main.py'])
+        prepare_context(tmp_path, ["../main.py"])
     with pytest.raises(ExplorerError):
-        prepare_context(tmp_path, ['main.py'] * 2)
+        prepare_context(tmp_path, ["main.py"] * 2)
 
 
 def test_symlink_cannot_be_selected(tmp_path: Path):
-    (tmp_path / 'outside.py').write_text('safe')
-    (tmp_path / 'link.py').symlink_to(tmp_path / 'outside.py')
+    (tmp_path / "outside.py").write_text("safe")
+    (tmp_path / "link.py").symlink_to(tmp_path / "outside.py")
     with pytest.raises(ExplorerError):
-        prepare_context(tmp_path, ['link.py'])
+        prepare_context(tmp_path, ["link.py"])
 
 
 def test_insights_api_and_preview(tmp_path: Path):
-    root = tmp_path / 'repository'
+    root = tmp_path / "repository"
     root.mkdir()
-    (root / 'app.py').write_text('def main(): pass')
-    app = create_app(tmp_path / 'data')
+    (root / "app.py").write_text("def main(): pass")
+    app = create_app(tmp_path / "data")
     client = TestClient(app)
-    project = client.post('/api/projects/register', json={'path': str(root)}).json()
-    project_id = project['id']
-    result = client.get(f'/api/projects/{project_id}/insights')
+    project = client.post("/api/projects/register", json={"path": str(root)}).json()
+    project_id = project["id"]
+    result = client.get(f"/api/projects/{project_id}/insights")
     assert result.status_code == 200
-    assert result.json()['candidates'][0]['path'] == 'app.py'
-    preview = client.post(f'/api/projects/{project_id}/context/preview', json={'paths': ['app.py']})
+    assert result.json()["candidates"][0]["path"] == "app.py"
+    preview = client.post(
+        f"/api/projects/{project_id}/context/preview", json={"paths": ["app.py"]}
+    )
     assert preview.status_code == 200
-    assert preview.json()['total_bytes'] > 0
-    assert client.post(f'/api/projects/{project_id}/context/preview', json={'paths': ['.env']}).status_code == 422
+    assert preview.json()["total_bytes"] > 0
+    assert (
+        client.post(
+            f"/api/projects/{project_id}/context/preview", json={"paths": [".env"]}
+        ).status_code
+        == 422
+    )
 
 
 def test_digest_changes_when_file_changes(tmp_path: Path):
-    file = tmp_path / 'main.py'
-    file.write_text('x = 1')
-    before = prepare_context(tmp_path, ['main.py'])['digest']
-    file.write_text('x = 2')
-    assert before != prepare_context(tmp_path, ['main.py'])['digest']
+    file = tmp_path / "main.py"
+    file.write_text("x = 1")
+    before = prepare_context(tmp_path, ["main.py"])["digest"]
+    file.write_text("x = 2")
+    assert before != prepare_context(tmp_path, ["main.py"])["digest"]
 
 
-
-
-@pytest.mark.parametrize('manifest', ['settings.gradle', 'settings.gradle.kts'])
+@pytest.mark.parametrize("manifest", ["settings.gradle", "settings.gradle.kts"])
 def test_gradle_settings_context(tmp_path: Path, manifest: str):
     (tmp_path / manifest).write_text('rootProject.name = "demo"')
-    (tmp_path / 'settings.py').write_text('x = 1')
-    (tmp_path / 'secrets').mkdir()
-    (tmp_path / 'secrets' / manifest).write_text('x = 1')
-    assert [f['path'] for f in analyze_repository(tmp_path)['candidates']] == [manifest]
-    assert prepare_context(tmp_path, [manifest])['files'][0]['path'] == manifest
-    for path in ['settings.py', f'secrets/{manifest}']:
+    (tmp_path / "settings.py").write_text("x = 1")
+    (tmp_path / "secrets").mkdir()
+    (tmp_path / "secrets" / manifest).write_text("x = 1")
+    assert [f["path"] for f in analyze_repository(tmp_path)["candidates"]] == [manifest]
+    assert prepare_context(tmp_path, [manifest])["files"][0]["path"] == manifest
+    for path in ["settings.py", f"secrets/{manifest}"]:
         with pytest.raises(ExplorerError):
             prepare_context(tmp_path, [path])
     (tmp_path / manifest).write_text('password = "abcdefgh123456"')
-    with pytest.raises(ExplorerError, match='credential'):
+    with pytest.raises(ExplorerError, match="credential"):
         prepare_context(tmp_path, [manifest])
