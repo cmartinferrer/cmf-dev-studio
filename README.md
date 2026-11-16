@@ -2,9 +2,9 @@
 
 **AI-powered development. Human-controlled changes.**
 
-CMF Dev Studio is an open-source, local-first, browser-based development environment that combines an integrated code editor, a multi-agent AI assistant and isolated automated testing. It helps developers evolve existing repositories or create new projects while retaining control over the files shared with AI and the changes applied to their code.
+CMF Dev Studio is an open-source, local-first, browser-based development environment that combines an integrated code editor, a multi-agent AI assistant and approved local testing. It helps developers evolve existing repositories or create new projects while retaining control over the files shared with AI and the changes applied to their code.
 
-[![CI](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![Dependency Security](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-19-61DAFB) ![Docker](https://img.shields.io/badge/testing-Docker-2496ED)
+[![CI](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![Dependency Security](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.1.0-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-19-61DAFB) 
 
 > **Development status:** Alpha. The Python, Java and Kotlin reference workflows have been validated end to end. The project is actively evolving; review the current limitations before using it with important repositories.
 
@@ -34,7 +34,7 @@ CMF Dev Studio is an open-source, local-first, browser-based development environ
 
 CMF Dev Studio began as a personal learning exercise to understand agentic AI, multi-agent collaboration and orchestration in software engineering. The initial experiment brought together three specialized agents — Analyst, Developer and Tester — to explore how they could collaborate on a software development task.
 
-As the experiment evolved, it grew into an integrated development environment with repository-level changes, automated review and repair, isolated testing, and explicit human approval. A single language-independent orchestrator now coordinates workflows for Python, Java and Kotlin.
+As the experiment evolved, it grew into an integrated development environment with repository-level changes, automated review, approved local testing, and explicit human approval. A single language-independent orchestrator now coordinates workflows for Python, Java and Kotlin.
 
 The project remains an ongoing learning and engineering initiative. By releasing it as open source under the MIT License, the aim is to share the experience, encourage collaboration and provide a practical foundation for developers interested in exploring AI-powered software engineering.
 
@@ -44,7 +44,7 @@ The project remains an ongoing learning and engineering initiative. By releasing
 - **AI-assisted development:** describe a change in natural language and receive a repository-level proposal with requirements, acceptance criteria and file diffs.
 - **Single orchestrator:** Analyst, Developer and Tester collaborate through one language-independent workflow.
 - **Multi-language testing:** automatic runner selection for Python/pytest, Java/Maven and Kotlin/Gradle.
-- **Iterative repair:** bounded review and test-driven correction attempts, with infrastructure failures distinguished from code failures.
+- **Iterative review:** bounded agent review before execution; failed tests require a new user decision.
 - **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider.
 - **Human-controlled application:** review and test isolated changes before explicitly applying them to the original project.
 - **Local persistence:** SQLite project registry and proposal history, with snapshots stored on disk.
@@ -65,14 +65,14 @@ flowchart TD
     D --> LLM
     T --> LLM
     LLM --> G[Gemini API]
-    O -->|Test and repair callbacks| WS
+    O -->|Approved test execution| WS
     WS --> R[Project runners]
     R --> P[pytest]
     R --> M[Maven]
     R --> K[Gradle]
-    P --> Docker[Isolated Docker execution]
-    M --> Docker
-    K --> Docker
+    P --> Local[Approved local execution]
+    M --> Local
+    K --> Local
     WS --> DB[(SQLite and snapshots)]
     PM --> DB
 ```
@@ -84,7 +84,7 @@ flowchart TD
 | `contracts.py` | Defines structured response contracts and parsing. |
 | `workflow.py` | Defines technology identification and retry policy. |
 | `workspaces.py` | Manages proposal lifecycle, snapshots, persistence, permissions and safe application. |
-| `project_runners.py` | Selects and executes Docker-based test adapters. |
+| `project_runners.py` | Selects and executes native test adapters. |
 | `projects/` | Manages project registration, browsing, context discovery and editor operations. |
 | `llm/` | Defines the provider interface and Gemini adapter. |
 | `api/` | Exposes local REST and terminal WebSocket endpoints. |
@@ -104,11 +104,12 @@ flowchart TD
     Validate --> Tester[Tester: independent review]
     Tester --> Review{Review accepted?}
     Review -->|No, retry allowed| Developer
-    Review -->|Yes| Run[Execute selected test runner]
+    Review -->|Yes| Permission{Approve local command?}
+    Permission -->|Yes| Run[Execute selected test runner]
+    Permission -->|No| Keep
     Run --> Result{Tests pass?}
-    Result -->|Recoverable failure, retry allowed| Developer
     Result -->|Yes| Diff[Review verified diffs]
-    Result -->|Infrastructure failure or exhausted retries| Stop[Report failure]
+    Result -->|Failure| Stop[Report failure]
     Review -->|Retries exhausted| Stop
     Diff --> Approval{User approves?}
     Approval -->|Yes, conflict checks pass| Apply[Apply changes]
@@ -135,7 +136,7 @@ The Maven and Gradle adapters require test sources under `src/test/`. The Gradle
 | Frontend | React, TypeScript, Vite, Lucide |
 | Editor and terminal | Monaco Editor, xterm.js, local PTY |
 | AI | Google Gemini SDK, structured JSON responses |
-| Execution | Docker, pytest, Maven, Gradle |
+| Execution | pytest, Maven, Gradle |
 | Tooling | uv, npm, pytest |
 
 ## Getting started
@@ -144,7 +145,7 @@ The Maven and Gradle adapters require test sources under `src/test/`. The Gradle
 
 - Python 3.10 or newer and a compatible version of uv.
 - Node.js 20 or 22 and npm.
-- Docker Engine or Docker Desktop, running and able to mount your project directories.
+- Native build tools for the languages you use.
 - A Gemini API key and access to the model configured in `src/cmf_dev_studio/llm/gemini.py`.
 - A POSIX development environment (Linux or macOS) for the integrated PTY terminal.
 
@@ -165,15 +166,9 @@ npm ci
 cd ..
 ```
 
-### Build test runner images
+### Native test tools
 
-Run from the repository root. The initial image builds require Internet access to fetch dependencies.
-
-```bash
-docker build -f docker/project-test-runner.Dockerfile -t cmf-dev-studio-runner-python:0.1.0 .
-docker build -f docker/maven-test-runner.Dockerfile -t cmf-dev-studio-runner-maven:0.1.0 .
-docker build -f docker/gradle-test-runner.Dockerfile -t cmf-dev-studio-runner-gradle:0.1.0 .
-```
+Install Maven and JDK 21 for Java, Gradle for Kotlin, and uv/pytest for Python as needed. Commands run locally with network access after explicit approval in chat. No runner images are required.
 
 ### Run the application
 
@@ -199,7 +194,7 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The frontend proxies API an
 1. Create a managed project or choose **Open existing project** and register a local directory.
 2. Browse files in the explorer, open them in the editor, or use the integrated terminal.
 3. Open the assistant and describe a concrete development task. If existing files are needed, choose and preview the context, then authorize it and retry the request.
-4. Inspect the acceptance criteria, generated file operations and diffs. The assistant runs the appropriate tests in an isolated snapshot.
+4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution. Failed tests do not trigger automatic repair or execution.
 5. Review the test output. If verification fails, inspect the error or retry after addressing the cause.
 6. Accept verified changes explicitly. Existing projects require additional write authorization; follow the confirmation shown by the IDE.
 
@@ -252,7 +247,6 @@ cmf-dev-studio/
 │   ├── workflow.py
 │   └── workspaces.py
 ├── frontend/
-├── docker/
 ├── examples/
 │   ├── python-pytest/
 │   ├── java-maven/
@@ -269,13 +263,13 @@ Run the backend unit and API tests:
 uv run pytest -q -m "not integration"
 ```
 
-After building all three runner images, run the real Docker integration tests:
+Optionally run native integration tests (requires installed build tools):
 
 ```bash
 uv run pytest -q -m integration
 ```
 
-The parametrized integration test uses the three reference projects and verifies automatic runner selection and real test execution. It does not call Gemini. The examples must be accessible to the Docker daemon through bind mounts.
+The parametrized integration test uses the three reference projects and verifies automatic runner selection and real test execution. It does not call Gemini. Missing native tools cause the corresponding integration test to be skipped.
 
 Build the frontend:
 
@@ -291,9 +285,9 @@ For end-to-end verification, open each reference project in the IDE, submit a ch
 - The application is intended for a trusted local user. Bind the backend and frontend to loopback; do not expose them to untrusted networks.
 - Repository context is explicitly approved and checked for sensitive files and credential patterns. These checks are not a guarantee that all secrets are detected.
 - Approved context and task information are transmitted to Gemini; local-first does not mean offline AI or that all data remains on the machine.
-- Test containers mount proposal snapshots read-only, copy them into temporary writable storage, run as a non-root user, drop capabilities and have network access disabled. Resource limits and timeouts are enforced.
-- Original repositories are not mounted in test containers. Applying a proposal requires explicit approval and conflict checks.
-- The integrated terminal runs on the host with the user's permissions; it is not the Docker test sandbox.
+- Approved test commands run with your user permissions and Internet access in a disposable copy. This is not a security sandbox. Code can access your home directory and network.
+- Applying a proposal requires explicit approval and conflict checks. Local code can still access original repositories.
+- The integrated terminal runs on the host with the user's permissions; it is not sandboxed.
 - Use trusted repositories only. This application is not a hardened security boundary for hostile code or multi-tenant deployment.
 
 ### Dependency security
@@ -310,7 +304,7 @@ Dependabot provides automated dependency update pull requests. These audits dete
 
 ## Extending the platform
 
-To add a language or build tool, extend technology identification in `workflow.py`, eligible context discovery in `projects/intelligence.py` as needed, and runner selection/execution in `project_runners.py`. Supply a Docker image with the required dependencies and add a reference project and integration case. Keep orchestration language-independent.
+To add a language or build tool, extend technology identification in `workflow.py`, eligible context discovery in `projects/intelligence.py` as needed, and runner selection/execution in `project_runners.py`. Add a native command, reference project and integration case. Keep orchestration language-independent.
 
 To add an AI provider, implement the `LLMClient` contract in `llm/`, including structured responses where supported, and wire the provider into workspace orchestration. Add provider and agent-contract tests. Provider selection is not currently a user-facing setting.
 

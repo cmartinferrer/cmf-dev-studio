@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .models import Project, ProjectKind
+from .models import Project, ProjectKind, ProjectLanguage
 
 _NAME_PATTERN = re.compile(r"^[\w][\w .-]{0,79}$", re.UNICODE)
 
@@ -28,8 +28,12 @@ class ProjectManager:
                 path TEXT NOT NULL UNIQUE,
                 kind TEXT NOT NULL CHECK(kind IN ('managed', 'existing')),
                 description TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'auto'
             )""")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
+            if "language" not in columns:
+                db.execute("ALTER TABLE projects ADD COLUMN language TEXT NOT NULL DEFAULT 'auto'")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -48,27 +52,29 @@ class ProjectManager:
         return Project(
             id=row["id"], name=row["name"], path=Path(row["path"]),
             kind=ProjectKind(row["kind"]), description=row["description"],
-            created_at=row["created_at"],
+            created_at=row["created_at"], language=ProjectLanguage(row["language"]),
         )
 
-    def _insert(self, name: str, path: Path, kind: ProjectKind, description: str) -> Project:
+    def _insert(self, name: str, path: Path, kind: ProjectKind, description: str,
+                language: ProjectLanguage = ProjectLanguage.AUTO) -> Project:
         project = Project(
             id=str(uuid4()), name=name, path=path, kind=kind,
-            description=description,
+            description=description, language=ProjectLanguage(language),
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         with self._connect() as db:
             try:
                 db.execute(
-                    "INSERT INTO projects (id, name, path, kind, description, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO projects (id, name, path, kind, description, created_at, language) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (project.id, project.name, str(project.path), project.kind.value,
-                     project.description, project.created_at),
+                     project.description, project.created_at, project.language.value),
                 )
             except sqlite3.IntegrityError as exc:
                 raise ValueError(f"Project path is already registered: {path}") from exc
         return project
 
-    def create(self, name: str, description: str = "") -> Project:
+    def create(self, name: str, description: str = "",
+               language: ProjectLanguage = ProjectLanguage.AUTO) -> Project:
         """Create an empty managed workspace, never replacing an existing folder."""
         name = self._validate_name(name)
         # IDs avoid collisions even for projects with identical display names.
@@ -76,7 +82,7 @@ class ProjectManager:
         path = self.managed_dir / project_id
         path.mkdir(exist_ok=False)
         try:
-            return self._insert(name, path.resolve(), ProjectKind.MANAGED, description)
+            return self._insert(name, path.resolve(), ProjectKind.MANAGED, description, language)
         except Exception:
             path.rmdir()  # Roll back only the new, still-empty directory.
             raise

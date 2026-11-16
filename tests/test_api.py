@@ -61,3 +61,17 @@ def test_reject_registering_studio_data_directory(tmp_path):
     studio = tmp_path / "studio"
     with TestClient(create_app(studio)) as client:
         assert client.post("/api/projects/register", json={"path": str(studio)}).status_code == 422
+
+
+def test_project_language_http_contract(tmp_path):
+    """Explicit languages round-trip through create, get and list; invalid values fail."""
+    with TestClient(create_app(tmp_path / 'studio')) as client:
+        for language in ('python', 'java', 'kotlin'):
+            response = client.post('/api/projects', json={'name': language, 'language': language})
+            assert response.status_code == 201
+            project = response.json()
+            assert project['language'] == language
+            assert client.get('/api/projects/' + project['id']).json() == project
+        assert {p['language'] for p in client.get('/api/projects').json()} == {'python', 'java', 'kotlin'}
+        assert client.post('/api/projects', json={'name': 'bad', 'language': 'invalid'}).status_code == 422
+        assert client.post('/api/projects', json={'name': 'legacy'}).json()['language'] == 'auto'

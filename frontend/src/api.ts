@@ -1,4 +1,6 @@
-export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean };
+export type ProjectLanguage = 'auto' | 'python' | 'java' | 'kotlin';
+export const projectLanguageLabels: Record<ProjectLanguage, string> = { auto: 'Auto', python: 'Python', java: 'Java', kotlin: 'Kotlin' };
+export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean; language: ProjectLanguage };
 export async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api${endpoint}`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } }); }
@@ -11,7 +13,7 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
   return response.json() as Promise<T>;
 }
 export const listProjects = () => request<Project[]>('/projects');
-export const createProject = (name: string, description: string) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description }) });
+export const createProject = (name: string, description: string, language: ProjectLanguage) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description, language }) });
 export const registerProject = (path: string, name: string, description: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path, name: name || null, description }) });
 
 
@@ -37,7 +39,9 @@ export const createProposal = (projectId: string, task: string, contextPaths: st
 export const listProposals = (projectId: string) => request<Proposal[]>(`/projects/${encodeURIComponent(projectId)}/proposals`);
 export const getProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
 
-export const testProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST'});
+export type TestPreview = {command: string[]; approval: string; working_directory: string; timeout: number};
+export const previewTest = (proposalId: string) => request<TestPreview>(`/proposals/${encodeURIComponent(proposalId)}/test`);
+export const testProposal = (proposalId: string, approval: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST', body: JSON.stringify({approval})});
 export const applyProposal = (proposalId: string, confirmation: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({confirmation, allow_existing: allowExisting})});
 
 export type EditableFile = FilePreview & { sha256: string };

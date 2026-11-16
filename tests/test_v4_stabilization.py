@@ -43,12 +43,12 @@ def test_syntax_error_is_repaired_in_generation():
     assert 'Syntax error' in llm.generate.call_args.args[0]
 
 @pytest.mark.parametrize('infra', [False, True])
-def test_existing_broken_proposal_repair_or_infrastructure_stop(tmp_path, monkeypatch, infra):
+def test_existing_broken_proposal_requires_new_approval(tmp_path, monkeypatch, infra):
     import sys, types, subprocess
     from pathlib import Path
     import cmf_dev_studio.workspaces as ws
-    from cmf_dev_studio.projects.manager import ProjectManager
-    manager = ProjectManager(tmp_path/'data'); project = manager.create('demo')
+    from cmf_dev_studio.projects import ProjectManager, ProjectLanguage
+    manager = ProjectManager(tmp_path/'data'); project = manager.create('demo', language=ProjectLanguage.PYTHON)
     service = ws.WorkspaceService(manager); pid = 'a'*32
     baseline = service.baselines/pid; baseline.mkdir()
     workspace = service.root/pid; workspace.mkdir()
@@ -69,11 +69,17 @@ def test_existing_broken_proposal_repair_or_infrastructure_stop(tmp_path, monkey
     llm=Mock(); llm.generate.side_effect=[json.dumps({'operations':[{'action':'modify','path':'test_app.py','content':original['test_app.py'].decode()+'\ndef test_greeting():\n    assert "Hello" == "Hello"\n'}]}),'{"issues": []}']
     module=types.ModuleType('cmf_dev_studio.llm.gemini'); module.GeminiClient=lambda:llm
     monkeypatch.setitem(sys.modules,module.__name__,module)
-    result=service.test(pid)
-    assert result['status']==('test_failed' if infra else 'tested'), result
-    assert len(calls)==(1 if infra else 2)
-    assert llm.generate.call_count==(0 if infra else 2)
+    with pytest.raises(ws.WorkspaceError, match="Explicit approval"):
+        service.test(pid)
+    preview = service.test_preview(pid)
+    result=service.test(pid, preview["approval"])
+    assert result['status']=='test_failed', result
+    assert len(calls)==1
+    assert llm.generate.call_count==0
     assert (project.path/'test_app.py').read_bytes()==original['test_app.py']
-    if not infra:
-        service.apply(pid,'demo')
-        assert 'test_greeting' in (project.path/'test_app.py').read_text()
+    with pytest.raises(ws.WorkspaceError, match='Explicit approval'):
+        service.test(pid, preview['approval'])
+    preview = service.test_preview(pid)
+    (workspace/'test_app.py').write_text('def test_new(): assert True')
+    with pytest.raises(ws.WorkspaceError, match='Explicit approval'):
+        service.test(pid, preview['approval'])

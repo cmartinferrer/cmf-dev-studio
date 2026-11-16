@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, status, WebSocket
 from cmf_dev_studio.api.terminal import terminal_socket
 from pydantic import BaseModel, Field
 
-from cmf_dev_studio.projects import Project, ProjectManager
+from cmf_dev_studio.projects import Project, ProjectLanguage, ProjectManager
 from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
 from cmf_dev_studio.workspaces import WorkspaceService, WorkspaceError
 from cmf_dev_studio.projects.browser import FolderBrowserError, browse_directory
@@ -25,9 +25,11 @@ class ProjectResponse(BaseModel):
     description: str
     created_at: str
     read_only: bool
+    language: ProjectLanguage
 
 
 class CreateProjectRequest(BaseModel):
+    language: ProjectLanguage = ProjectLanguage.AUTO
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=2000)
 
@@ -47,6 +49,7 @@ def _response(project: Project) -> ProjectResponse:
         description=project.description,
         created_at=project.created_at,
         read_only=project.read_only,
+        language=project.language,
     )
 
 
@@ -73,7 +76,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/projects", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
     def create_project(request: CreateProjectRequest) -> ProjectResponse:
         try:
-            return _response(manager.create(request.name, request.description))
+            return _response(manager.create(request.name, request.description, language=request.language))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -238,10 +241,22 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         confirmation: str
         allow_existing: bool = False
 
-    @app.post("/api/proposals/{proposal_id}/test")
-    def test_proposal(proposal_id: str) -> dict:
+    class TestApproval(BaseModel):
+        approval: str
+
+    @app.get("/api/proposals/{proposal_id}/test")
+    def preview_test(proposal_id: str) -> dict:
         try:
-            return workspaces.test(proposal_id)
+            return workspaces.test_preview(proposal_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/proposals/{proposal_id}/test")
+    def test_proposal(proposal_id: str, request: TestApproval) -> dict:
+        try:
+            return workspaces.test(proposal_id, request.approval)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:

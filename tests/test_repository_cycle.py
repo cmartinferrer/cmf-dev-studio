@@ -17,16 +17,11 @@ def test_cycle_stops_on_infrastructure():
     assert not Orchestrator.repository_test_cycle(WorkflowPolicy(), run, repair)[0]
     repair.assert_not_called()
 
-@pytest.mark.parametrize('directory,name,cache', [('java-maven','maven','/tmp/maven/repository'),('kotlin-gradle','gradle','/tmp/gradle')])
-def test_jvm_example_runner(directory,name,cache,monkeypatch):
+@pytest.mark.parametrize('directory,name', [('java-maven','maven'),('kotlin-gradle','gradle')])
+def test_jvm_example_runner(directory,name):
     from pathlib import Path
-    from cmf_dev_studio import project_runners
     root = Path(__file__).resolve().parents[1] / 'examples' / directory
     spec = select_runner(root)
     assert spec.name == name
-    run = Mock(return_value=Mock(returncode=0,stdout='ok',stderr=''))
-    monkeypatch.setattr(project_runners.subprocess,'run',run)
-    assert execute_runner(root,spec)[0]
-    command = run.call_args.args[0]
-    assert cache in ' '.join(command)
-    assert '--read-only' in command and '--network' in command and 'none' in command
+    assert spec.command[0] == name.replace('maven','mvn')
+    assert '-o' not in spec.command and '--offline' not in spec.command

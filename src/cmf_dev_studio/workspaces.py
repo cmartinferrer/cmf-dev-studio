@@ -15,7 +15,7 @@ from threading import Thread
 from uuid import uuid4
 
 from cmf_dev_studio.projects.manager import ProjectManager
-from cmf_dev_studio.workflow import WorkflowPolicy
+from cmf_dev_studio.projects.models import ProjectLanguage
 from cmf_dev_studio.orchestrator import Orchestrator
 from cmf_dev_studio.contracts import Plan
 from cmf_dev_studio.agents.developer import build_workspace_prompt
@@ -109,9 +109,22 @@ def detect_languages(original: dict[str, bytes]) -> list[str]:
     return detected
 
 
+def project_task(task: str, language: ProjectLanguage) -> str:
+    """Carry explicit project configuration to every agent, including repairs."""
+    if language is ProjectLanguage.AUTO:
+        return task
+    name = {ProjectLanguage.PYTHON: 'Python', ProjectLanguage.JAVA: 'Java',
+            ProjectLanguage.KOTLIN: 'Kotlin'}[language]
+    return (f'PROJECT CONFIGURATION: Primary implementation language is {name}. '
+            f'Use {name} for application code and its tests, with a compatible build '
+            'and test runner. Supporting configuration and documentation may use other formats. '
+            'Do not switch the primary language based on the task or an empty inventory. '
+            f'\nUSER TASK:\n{task}')
+
+
 def validate_operations(operations: object, original: dict[str, bytes], approved_paths: set[str]) -> None:
     if not isinstance(operations, list) or not 1 <= len(operations) <= 12:
-        raise WorkspaceError('Expected 1-12 operations; existing files may require context approval')
+        raise WorkspaceError('Expected 1-12 file operations; generate create operations for new files')
     seen: set[str] = set()
     for op in operations:
         if not isinstance(op, dict):
@@ -146,6 +159,7 @@ def validate_operations(operations: object, original: dict[str, bytes], approved
 class WorkspaceService:
     def __init__(self, manager: ProjectManager):
         self.manager = manager
+        self._test_approvals: dict[str, tuple[str, str]] = {}
         self.root = manager.data_dir / 'proposal-workspaces'
         self.root.mkdir(parents=True, exist_ok=True)
         self.baselines = manager.data_dir / 'proposal-baselines'
@@ -314,6 +328,10 @@ class WorkspaceService:
             inventory = '\n'.join(sorted(original))[:12000]
             approved = '\n\n'.join(f"FILE: {f['path']}\n{f['content']}" for f in context['files'])
             approved_paths = {f['path'] for f in context['files']}
+            project = self.manager.get(self.get(proposal_id)['project_id'])
+            if project is None:
+                raise WorkspaceError('Project not found')
+            task = project_task(task, project.language)
             languages = detect_languages(original)
             operations = engine.prepare(task, inventory, approved, languages, original, approved_paths,
                 lambda ops: validate_operations(ops, original, approved_paths),
@@ -327,7 +345,6 @@ class WorkspaceService:
             self._stage(proposal_id, 'failed')
 
 # v2.2: verified application and isolated project-level test execution.
-import subprocess
 import threading
 
 _APPLY_LOCK = threading.RLock()
@@ -346,107 +363,52 @@ def _checked_target(root: Path, path: str) -> Path:
     return target
 
 
-def _test_proposal(self: WorkspaceService, proposal_id: str) -> dict:
-    with _APPLY_LOCK:
-        try:
-            return _test_proposal_locked(self, proposal_id)
-        except Exception as exc:
-            with self._db() as db:
-                db.execute("UPDATE workspace_proposals SET status='test_failed', tested_digest='', agent_stage='test_failed', test_output=? WHERE id=? AND status='running'", (str(exc)[:500], proposal_id))
-            raise
-
-def _test_proposal_locked(self: WorkspaceService, proposal_id: str) -> dict:
+def _test_details(self: WorkspaceService, proposal_id: str) -> dict:
     row = self.get(proposal_id)
     if row['status'] not in ('ready', 'tested', 'test_failed'):
         raise WorkspaceError('Proposal must be ready before testing')
     workspace = self.root / proposal_id
     if not workspace.is_dir():
         raise WorkspaceError('Proposal workspace missing')
-    project = self.manager.get(row['project_id'])
-    if project is None:
-        raise WorkspaceError('Project not found')
     try:
         spec = select_runner(workspace)
     except UnsupportedRunner as exc:
         raise WorkspaceError(str(exc)) from exc
-    plan_data = row['plan']
-    plan = Plan(tuple(plan_data.get('requirements', ())), tuple(plan_data.get('acceptance', ())))
-    approved_paths = set(row['approved_paths'])
-    baseline = self.baselines / proposal_id
-    original = {p.relative_to(baseline).as_posix(): p.read_bytes() for p in baseline.rglob('*') if p.is_file() and not p.is_symlink()}
-    with self._db() as db:
-        db.execute("UPDATE workspace_proposals SET status='running',tested_digest='' WHERE id=?", (proposal_id,))
-    def run(attempt):
-        self._stage(proposal_id, 'testing')
-        before_test = tree_digest(workspace)
-        passed, output = execute_runner(workspace, spec)
-        if tree_digest(workspace) != before_test:
-            passed = False
-            output = 'Workspace changed during testing; verification invalidated' 
-        with self._db() as db:
-            db.execute('UPDATE workspace_proposals SET attempts=?,test_output=? WHERE id=?', (attempt, output, proposal_id))
-        if passed:
-            with self._db() as db:
-                db.execute("UPDATE workspace_proposals SET status='tested',tested_digest=? WHERE id=?", (before_test, proposal_id))
-            self._stage(proposal_id, 'verified')
-            return True, output
-        return False, output
-    def repair(output):
-        nonlocal spec
-        if not plan.acceptance:
-            return False, output
-        # Refuse to repair if approved originals have changed in the real project.
-        for path in approved_paths:
-            current = _checked_target(project.path, path)
-            if not current.is_file() or digest(current.read_bytes()) != digest(original.get(path)):
-                output += '\nApproved source changed since proposal; restart with fresh context'
-                break
-        else:
-            current = None
-        if current is not None:
-            return False, output
-        try:
-            from dotenv import load_dotenv
-            from cmf_dev_studio.llm.gemini import GeminiClient
-            load_dotenv()
-            engine = Orchestrator(GeminiClient())
-        except Exception as exc:
-            output += '\nRepair unavailable: ' + str(exc)[:300]
-            return False, output
-        approved = '\n\n'.join(f'FILE: {p}\n{original[p].decode("utf-8")}' for p in sorted(approved_paths))
-        prompt = build_workspace_prompt(row['task'], '\n'.join(sorted(original))[:12000],
-                                        approved, detect_languages(original))
-        previous_patch = []
-        for change in self.get(proposal_id)['changes']:
-            path = change['path']
-            if change['action'] != 'create' and path not in approved_paths:
-                continue
-            previous_patch.append({'path': path, 'action': change['action'], 'content': '' if change['action'] == 'delete' else (workspace / safe_path(path)).read_text(encoding='utf-8')})
-        prompt += '\nPrevious generated patch (replace with complete corrected operations):\n' + json.dumps(previous_patch, ensure_ascii=False)
-        self._stage(proposal_id, 'developer_repair')
-        try:
-            operations = engine.reviewed_patch(row['task'], prompt, plan, original, approved_paths,
-                lambda ops: validate_operations(ops, original, approved_paths),
-                lambda stage: self._stage(proposal_id, stage), feedback=output)
-        except Exception as exc:
-            output += '\nRepair failed: ' + str(exc)[:500]
-            return False, output
-        changes = self._write_operations(proposal_id, operations, original)
-        self._update(proposal_id, 'running', changes=changes)
-        try:
-            spec = select_runner(workspace)
-        except UnsupportedRunner as exc:
-            output += '\n' + str(exc)
-            return False, output
-        return True, output
+    command = list(spec.command)
+    approval = hashlib.sha256(json.dumps([proposal_id, tree_digest(workspace), command]).encode()).hexdigest()
+    return {'command': command, 'approval': approval, 'working_directory': 'Temporary copy of proposal', 'timeout': spec.timeout}
 
-    passed, output = Orchestrator.repository_test_cycle(WorkflowPolicy(), run, repair)
-    if passed:
+
+def _test_preview(self: WorkspaceService, proposal_id: str) -> dict:
+    with _APPLY_LOCK:
+        details = _test_details(self, proposal_id)
+        token = uuid4().hex
+        self._test_approvals[proposal_id] = (token, details['approval'])
+        return {**details, 'approval': token}
+
+
+def _test_proposal(self: WorkspaceService, proposal_id: str, approval: str = '') -> dict:
+    with _APPLY_LOCK:
+        preview = _test_details(self, proposal_id)
+        expected = self._test_approvals.get(proposal_id)
+        if not approval or expected != (approval, preview['approval']):
+            raise WorkspaceError('Explicit approval of the current command and proposal is required')
+        self._test_approvals.pop(proposal_id, None)
+        workspace = self.root / proposal_id
+        spec = select_runner(workspace)
+        before = tree_digest(workspace)
+        with self._db() as db:
+            db.execute("UPDATE workspace_proposals SET status='running',tested_digest='',agent_stage='testing' WHERE id=?", (proposal_id,))
+        try:
+            passed, output = execute_runner(workspace, spec)
+            if tree_digest(workspace) != before:
+                passed, output = False, 'Workspace changed during testing; verification invalidated'
+        except Exception as exc:
+            passed, output = False, f'Runner infrastructure error: {exc}'
+        with self._db() as db:
+            db.execute('UPDATE workspace_proposals SET status=?,tested_digest=?,agent_stage=?,attempts=attempts+1,test_output=? WHERE id=?',
+                       ('tested' if passed else 'test_failed', before if passed else '', 'verified' if passed else 'test_failed', output, proposal_id))
         return self.get(proposal_id)
-    with self._db() as db:
-        db.execute("UPDATE workspace_proposals SET status='test_failed',test_output=? WHERE id=?", (output, proposal_id))
-    self._stage(proposal_id, 'test_failed')
-    return self.get(proposal_id)
 
 def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str, allow_existing: bool = False) -> dict:
     with _APPLY_LOCK:
@@ -516,5 +478,6 @@ def _apply_proposal(self: WorkspaceService, proposal_id: str, confirmation: str,
         return self.get(proposal_id)
 
 
+WorkspaceService.test_preview = _test_preview
 WorkspaceService.test = _test_proposal
 WorkspaceService.apply = _apply_proposal

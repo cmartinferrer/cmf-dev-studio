@@ -1,7 +1,7 @@
 [project]
 name = "cmf-dev-studio"
 version = "0.1.0"
-description = "Local-first AI-assisted development environment with multi-agent orchestration and isolated testing"
+description = "Local-first AI-assisted development environment with multi-agent orchestration and approved local testing"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -32,5 +32,5 @@ dev = [
 
 [tool.pytest.ini_options]
 markers = [
-    "integration: tests requiring a running Docker daemon"
+    "integration: optional tests requiring native build tools"
 ]

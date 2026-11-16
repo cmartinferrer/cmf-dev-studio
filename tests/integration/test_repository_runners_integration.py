@@ -1,4 +1,4 @@
-"""Integration tests for real Docker-based project runners."""
+"""Integration tests for real native project runners."""
 
 from pathlib import Path
 
@@ -28,6 +28,9 @@ def test_project_runner_real(example, expected_runner):
 
     assert runner.name == expected_runner
 
+    import shutil
+    if not shutil.which(runner.command[0]):
+        pytest.skip(f"Missing local tool: {runner.command[0]}")
     passed, output = execute_runner(root, runner)
 
     assert passed, output

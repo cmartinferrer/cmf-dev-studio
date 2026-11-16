@@ -107,7 +107,11 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_pa
         chosen.append(spec.name)
         return True, 'Runner: ' + spec.name + ' (exit 0)\n1 test passed'
     monkeypatch.setattr(workspaces, 'execute_runner', fake_runner)
-    tested = client.post(f'/api/proposals/{proposal_id}/test')
+    assert client.post(f'/api/proposals/{proposal_id}/test', json={'approval':'invalid'}).status_code == 409
+    assert not chosen
+    preview = client.get(f'/api/proposals/{proposal_id}/test').json()
+    assert not chosen
+    tested = client.post(f'/api/proposals/{proposal_id}/test', json={'approval':preview['approval']})
     assert tested.status_code == 200, tested.text
     assert tested.json()['status'] == 'tested'
     assert chosen == ['maven' if manifest == 'pom.xml' else 'gradle']
@@ -118,20 +122,14 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(tmp_pa
     assert file.read_text() == 'revised source'
 
 
-def test_docker_runner_isolated_and_offline(tmp_path, monkeypatch):
+def test_local_runner_uses_disposable_copy(tmp_path):
+    import sys
     from cmf_dev_studio.project_runners import execute_runner, RunnerSpec
-    import cmf_dev_studio.project_runners as runners
-    recorded = {}
-    def fake_run(command, **kwargs):
-        recorded['command'] = command
-        return type('Result', (), {'returncode': 0, 'stdout': '1 passed', 'stderr': ''})()
-    monkeypatch.setattr(runners.subprocess, 'run', fake_run)
-    passed, output = execute_runner(tmp_path, RunnerSpec('pytest', 'test-image', ('python', '-m', 'pytest')))
-    assert passed and '1 passed' in output
-    assert '--network' in recorded['command'] and 'none' in recorded['command']
-    assert '--read-only' in recorded['command']
-    assert 'readonly' in ' '.join(recorded['command'])
-    assert recorded['command'][-3:] == ['python', '-m', 'pytest']
+    (tmp_path / 'source.txt').write_text('original')
+    command = (sys.executable, '-c', "from pathlib import Path; Path('source.txt').write_text('changed'); print('ok')")
+    passed, output = execute_runner(tmp_path, RunnerSpec('python', command))
+    assert passed and 'ok' in output
+    assert (tmp_path / 'source.txt').read_text() == 'original'
 
 
 def test_tampered_workspace_cannot_be_applied(tmp_path, monkeypatch):
