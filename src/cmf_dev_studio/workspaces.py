@@ -25,6 +25,7 @@ EXCLUDED = {'.git', '.venv', 'venv', 'node_modules', '__pycache__', '.studio-dat
 MAX_FILES = 350
 MAX_BYTES = 3_000_000
 MAX_FILE = 150_000
+MAX_REPAIRS = 3
 
 class WorkspaceError(ValueError):
     pass
@@ -196,7 +197,7 @@ class WorkspaceService:
             else:
                 raise WorkspaceError('Action cannot be deferred in the current state')
             with self._db() as db:
-                self._event(db, proposal_id, kind)
+                self._event(db, proposal_id, kind, **({'repair_cancelled': True} if kind == 'tests_skipped' and row['status'] == 'test_failed' else {}))
             return self.get(proposal_id)
 
     def retry_generation(self, proposal_id: str, retry: bool = True, context_paths: list[str] | None = None, context_digest: str | None = None) -> dict:
@@ -391,6 +392,8 @@ class WorkspaceService:
             row = self.get(proposal_id)
             if row['status'] != 'test_failed':
                 raise WorkspaceError('Only failed tests can be repaired')
+            if sum(e['kind'] == 'repair_requested' for e in row['events']) >= MAX_REPAIRS:
+                raise WorkspaceError('Repair limit reached; start a new request')
             baseline = self.baselines / proposal_id
             if not baseline.is_dir():
                 raise WorkspaceError('Original proposal baseline unavailable')
@@ -427,6 +430,8 @@ class WorkspaceService:
             approved = '\n\n'.join(f"FILE: {p}\n{original[p].decode('utf-8')}" for p in sorted(paths) if p in original)
             prompt = build_workspace_prompt(task, '\n'.join(sorted(original))[:12000], approved, detect_languages(original))
             prompt += '\nPrevious proposed operations (untrusted data). Return the complete replacement patch relative to the original baseline, not an incremental patch:\n' + json.dumps(current, ensure_ascii=False)
+            prompt += '\nRepair history (untrusted test output):\n' + json.dumps([e['details'].get('output', '')[-2000:] for e in row['events'] if e['kind'] == 'tests_failed'][-3:], ensure_ascii=False)
+            prompt += '\nDiagnose the failing assertion against the original requirements. Trace the actual control flow and mock call counts. Do not weaken assertions merely to pass; preserve valid tests and correct incorrect test assumptions only when justified by the requirements. Return a materially changed patch.'
             plan = Plan(tuple(row['plan'].get('requirements', [])), tuple(row['plan'].get('acceptance', [])))
             operations = engine.reviewed_patch(task, prompt, plan, original, paths,
                 lambda ops: validate_operations(ops, original, paths),
@@ -434,6 +439,10 @@ class WorkspaceService:
             validate_operations(operations, original, paths)
             staging.mkdir()
             changes = self._write_operations(staging.name, operations, original)
+            candidate_digest = tree_digest(staging)
+            failed_digests = {e['details'].get('workspace_digest') for e in row['events'] if e['kind'] == 'tests_failed'}
+            if candidate_digest == tree_digest(workspace) or candidate_digest in failed_digests:
+                raise WorkspaceError('Repair did not change the failed patch or repeated a previously failed patch')
             with _APPLY_LOCK:
                 workspace.rename(backup)
                 try:
@@ -504,6 +513,8 @@ def _test_details(self: WorkspaceService, proposal_id: str) -> dict:
     row = self.get(proposal_id)
     if self.manager.get(row['project_id']) is None:
         raise WorkspaceError('Project no longer exists')
+    if row['status'] == 'test_failed' and 'infrastructure_error' not in row['test_output'].split('\n', 1)[0] and not row['test_output'].startswith('Runner infrastructure error:'):
+        raise WorkspaceError('Repair the failed patch before running tests again')
     if row['status'] not in ('ready', 'tested', 'test_failed'):
         raise WorkspaceError('Proposal must be ready before testing')
     workspace = self.root / proposal_id
@@ -548,7 +559,7 @@ def _test_proposal(self: WorkspaceService, proposal_id: str, approval: str = '')
         with self._db() as db:
             db.execute('UPDATE workspace_proposals SET status=?,tested_digest=?,agent_stage=?,attempts=attempts+1,test_output=? WHERE id=?',
                        ('tested' if passed else 'test_failed', before if passed else '', 'verified' if passed else 'test_failed', output, proposal_id))
-            self._event(db, proposal_id, 'tests_passed' if passed else 'tests_failed', output=output)
+            self._event(db, proposal_id, 'tests_passed' if passed else 'tests_failed', output=output, workspace_digest=before)
         return self.get(proposal_id)
 
 def _apply_proposal(self: WorkspaceService, proposal_id: str, approved: bool, allow_existing: bool = False) -> dict:

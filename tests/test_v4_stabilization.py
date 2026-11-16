@@ -77,6 +77,14 @@ def test_existing_broken_proposal_requires_new_approval(tmp_path, monkeypatch, i
     assert len(calls)==1
     assert llm.generate.call_count==0
     assert (project.path/'test_app.py').read_bytes()==original['test_app.py']
+    if not infra:
+        with pytest.raises(ws.WorkspaceError, match='Repair the failed patch before running tests again'):
+            service.test(pid, preview['approval'])
+        with pytest.raises(ws.WorkspaceError, match='Repair the failed patch before running tests again'):
+            service.test_preview(pid)
+        assert len(calls) == 1
+        assert llm.generate.call_count == 0
+        return
     with pytest.raises(ws.WorkspaceError, match='Explicit approval'):
         service.test(pid, preview['approval'])
     preview = service.test_preview(pid)

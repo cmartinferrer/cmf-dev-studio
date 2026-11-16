@@ -22,7 +22,7 @@ def test_history_survives_restart_and_multiple_attempts(tmp_path, monkeypatch):
     service.defer(pid, 'tests')
     with pytest.raises(WorkspaceError, match='Explicit approval'):
         service.test(pid, preview['approval'])
-    results = iter([(False, 'first failure'), (True, 'second success')])
+    results = iter([(False, 'Runner: pytest (infrastructure_error): first failure'), (True, 'second success')])
     monkeypatch.setattr(workspaces, 'execute_runner', lambda *_: next(results))
     for _ in range(2):
         service.test(pid, service.test_preview(pid)['approval'])
@@ -30,7 +30,7 @@ def test_history_survives_restart_and_multiple_attempts(tmp_path, monkeypatch):
     service.apply(pid, True)
     events = WorkspaceService(manager).list(project.id)[0]['events']
     assert [e['kind'] for e in events] == ['files_generated','tests_skipped','command_approved','tests_failed','command_approved','tests_passed','apply_deferred','changes_applied']
-    assert [e['details']['output'] for e in events if 'output' in e['details']] == ['first failure','second success']
+    assert [e['details']['output'] for e in events if 'output' in e['details']] == ['Runner: pytest (infrastructure_error): first failure','second success']
     assert events[2]['details']['command']
     assert 'approval' not in events[2]['details']
     with pytest.raises(WorkspaceError):

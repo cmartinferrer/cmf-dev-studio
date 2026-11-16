@@ -1,9 +1,12 @@
 import { contextFiles, toggleRetryFile, sameContext } from './chatContext';
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, Terminal, X } from 'lucide-react';
+import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X } from 'lucide-react';
 import { decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
 
 type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePath: string|null; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
+const infrastructureFailure = (item:Proposal) => /infrastructure_error|^Runner infrastructure error:/.test((item.test_output??'').split('\n')[0]);
+const canRunTests = (item:Proposal) => item.status==='ready'||(item.status==='test_failed'&&infrastructureFailure(item));
+const repairCount = (item:Proposal) => item.events?.filter(e=>e.kind==='repair_requested').length??0;
 const activeStatuses = ['queued','running'];
 const describe = (status: Proposal['status']) => ({queued:'Waiting for the AI…',running:'Preparing changes…',ready:'Changes ready · Approval required',tested:'Tests passed · Ready to review',test_failed:'Tests failed · Review the output',applied:'Changes applied',failed:'Could not prepare changes'})[status];
 
@@ -34,10 +37,10 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
       switch(event.kind){
         case 'files_generated': case 'repair_ready': content=assistant(<><p>{event.kind==='repair_ready'?t('I have prepared a revised proposal.','He preparado una propuesta corregida.'):t(`I have prepared ${d.count ?? item.changes.length} files for your request.`,`He preparado ${d.count ?? item.changes.length} ficheros para tu petición.`)}</p>{event.sequence===lastGenerated&&files}</>);break;
         case 'command_approved': content=<>{assistant(<><p>{t('May I run this command to check the changes?','¿Puedo ejecutar este comando para comprobar los cambios?')}</p>{d.command&&<pre className="chat-history-command">{commandText(d.command)}</pre>}</>)}{user(t('Allow once','Permitir una vez'))}</>;break;
-        case 'tests_skipped': content=<>{assistant(<p>{t('May I run the tests?','¿Puedo ejecutar los tests?')}</p>)}{user(t('Skip','Omitir'))}{assistant(<p>{t('I will leave the proposal pending.','Dejo la propuesta pendiente.')}</p>)}</>;break;
+        case 'tests_skipped': content=d.repair_cancelled?<>{user(t('Cancel','Cancelar'))}{assistant(<p>{t('I will leave the failed proposal unchanged.','Dejo la propuesta fallida sin aplicar.')}</p>)}</>:<>{assistant(<p>{t('May I run the tests?','¿Puedo ejecutar los tests?')}</p>)}{user(t('Skip','Omitir'))}{assistant(<p>{t('I will leave the proposal pending.','Dejo la propuesta pendiente.')}</p>)}</>;break;
         case 'tests_passed': content=assistant(<><p>{t('The tests passed successfully.','Los tests han pasado correctamente.')}</p>{output(d.output)}</>);break;
         case 'tests_failed': content=assistant(<><p>{t('The test command failed. The project has not been changed.','La ejecución de los tests ha fallado. No he modificado el proyecto.')}</p>{output(d.output)}</>);break;
-        case 'repair_requested': content=<>{assistant(<p>{t('Would you like me to try to fix the failure?','¿Quieres que intente corregir el fallo?')}</p>)}{user(t('Fix and retry','Corregir y reintentar'))}</>;break;
+        case 'repair_requested': content=<>{assistant(<p>{t('The tests failed. Shall I correct the proposal before testing again?','Los tests han fallado. ¿Quieres que corrija la propuesta antes de volver a probarla?')}</p>)}{user(t('Fix and retry','Corregir y reintentar'))}</>;break;
         case 'apply_deferred': content=<>{assistant(<p>{t(`May I apply the changes to ${projectName}?`,`¿Aplico los cambios a ${projectName}?`)}</p>)}{user(t('Not now','Ahora no'))}</>;break;
         case 'changes_applied': content=<>{assistant(<p>{t(`May I apply the changes to ${projectName}?`,`¿Aplico los cambios a ${projectName}?`)}</p>)}{user(t('Accept changes','Aceptar cambios'))}{assistant(<p>{t(`I have saved ${d.count ?? item.changes.length} files to your project.`,`He guardado ${d.count ?? item.changes.length} ficheros en tu proyecto.`)}</p>)}</>;break;
         case 'generation_failed': case 'repair_failed': content=assistant(<><p>{transient(d.error)?t('The AI model is temporarily overloaded. I could not prepare the changes.','El modelo de IA está temporalmente saturado. No he podido preparar los cambios.'):needsContext(d.error)?t('I need the existing files in context before modifying them.','Necesito que añadas los ficheros existentes al contexto para poder modificarlos.'):t('I could not prepare the changes.','No he podido preparar los cambios.')}</p>{output(d.error)}{event.kind==='generation_failed'&&<p>{t('Would you like me to retry the same request?','¿Quieres que vuelva a intentar la misma petición?')}</p>}</>);break;
@@ -124,14 +127,14 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
   }
   const latest = items[items.length-1];
   const approvalItem = items.find(item=>item.id===selectedApproval) ?? latest;
-  const previewId = approvalItem && ['ready','test_failed'].includes(approvalItem.status) && !skipped.includes(approvalItem.id) && !discarded.includes(approvalItem.id) ? approvalItem.id : null;
+  const previewId = approvalItem && canRunTests(approvalItem) && !skipped.includes(approvalItem.id) && !discarded.includes(approvalItem.id) ? approvalItem.id : null;
   useEffect(()=>{
     setTestApproval(null);
     if(!previewId)return;
     let cancelled=false;
     previewTest(previewId).then(preview=>{if(!cancelled)setTestApproval({id:previewId,preview});}).catch(e=>{if(!cancelled){setError(String(e));setSkipped(old=>[...old,previewId]);}});
     return()=>{cancelled=true;};
-  },[projectId,previewId,approvalItem?.attempts]);
+  },[projectId,previewId,approvalItem?.attempts,approvalItem?.status]);
   async function generationDecision(item:Proposal,retry:boolean, selected:string[]){
     const useCurrent=retry&&!sameContext(selected,item.approved_paths??[]);
     if(workingId!==null||busy)return;
@@ -169,12 +172,14 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
           {workingId===item.id&&item.status!=='failed'&&<div className="chat-inline-status" role="status"><LoaderCircle className="chat-spin" size={14}/> {item.status==='tested'?t('Applying changes…','Aplicando cambios…'):t('Running approved local tests…','Ejecutando tests locales autorizados…')}</div>}
           {item.id!==approvalItem?.id&&['ready','test_failed'].includes(item.status)&&<button className="chat-link" disabled={workingId!==null} onClick={()=>setSelectedApproval(item.id)}>{t('Review command','Revisar comando')}</button>}
           {item.id===approvalItem?.id&&['ready','test_failed'].includes(item.status)&&workingId!==item.id&&(!skipped.includes(item.id)?<>
-            <p className="chat-action-text">{item.status==='test_failed'?t('Would you like me to fix the problem, or run the same tests again?','¿Quieres que corrija el problema o vuelva a ejecutar los mismos tests?'):t('May I run the tests to verify these changes?','¿Puedo ejecutar los tests para verificar estos cambios?')}</p>
-            {item.status==='test_failed'&&<div className="chat-inline-actions"><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void repair(item.id)}>{t('Fix and retry','Corregir y reintentar')}</button></div>}
-            <div className="chat-command-card">
-              <div className="chat-command-title"><Terminal size={14}/> {t('Run command','Ejecutar comando')} <small>{t('Local','Local')}</small></div>
-              {testApproval?.id===item.id?<><pre>{testApproval.preview.command.map(arg=>/^[\w./:=+-]+$/.test(arg)?arg:JSON.stringify(arg)).join(' ')}</pre><p>{t('Runs a temporary copy with your user permissions and Internet access. Review the files first.','Ejecuta una copia temporal con tus permisos de usuario y acceso a Internet. Revisa primero los ficheros.')}</p><div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>void defer(item.id,'tests')}>{t('Skip','Omitir')}</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void approveTests(item.id)}>{item.status==='test_failed'?t('Allow retry','Permitir reintento'):t('Allow once','Permitir una vez')}</button></div></>:<><p>{t('Preparing command approval…','Preparando autorización…')}</p><button className="chat-inline-muted" onClick={()=>void defer(item.id,'tests')}>{t('Cancel','Cancelar')}</button></>}
-            </div></>:<div className="chat-inline-status">{t('Tests not authorized.','Tests no autorizados.')} <button className="chat-link" onClick={()=>setSkipped(old=>old.filter(id=>id!==item.id))}>{t('Request again','Solicitar de nuevo')}</button></div>)}
+            {item.status==='test_failed'&&!infrastructureFailure(item)?<>
+              <p className="chat-action-text">{repairCount(item)>=3?t('I could not resolve the failure after three repair attempts. Start a new request to continue.','No he podido resolver el fallo tras tres intentos de corrección. Inicia una nueva petición para continuar.'):t('The tests failed. Shall I correct the proposal before testing again?','Los tests han fallado. ¿Quieres que corrija la propuesta antes de volver a probarla?')}</p>
+              <div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>void defer(item.id,'tests')}>{t('Cancel','Cancelar')}</button>{repairCount(item)<3&&<button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void repair(item.id)}>{t('Fix and retry','Corregir y reintentar')}</button>}</div>
+            </>:<>
+              <p className="chat-action-text">{item.status==='test_failed'?t('The runner failed. May I try the command again?','Ha fallado el entorno de ejecución. ¿Puedo volver a ejecutar el comando?'):t('May I run this command to check the changes?','¿Puedo ejecutar este comando para comprobar los cambios?')}</p>
+              {testApproval?.id===item.id?<><pre className="chat-history-command">{commandText(testApproval.preview.command)}</pre><small>{t('Temporary copy, local user permissions and Internet access.','Copia temporal, permisos de usuario locales y acceso a Internet.')}</small><div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>void defer(item.id,'tests')}>{t('Skip','Omitir')}</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void approveTests(item.id)}>{t('Allow once','Permitir una vez')}</button></div></>:<p>{t('Preparing command approval…','Preparando autorización…')}</p>}
+            </>}
+          </>:<div className="chat-inline-status">{item.status==='test_failed'?t('Repair paused.','Corrección detenida.'):t('Tests not authorized.','Tests no autorizados.')} <button className="chat-link" onClick={()=>setSkipped(old=>old.filter(id=>id!==item.id))}>{t('Request again','Solicitar de nuevo')}</button></div>)}
           {item.status==='tested'&&workingId!==item.id&&(discarded.includes(item.id)?<div className="chat-inline-status">{t('Changes not applied.','Cambios no aplicados.')} <button className="chat-link" onClick={()=>setDiscarded(old=>old.filter(id=>id!==item.id))}>{t('Review again','Revisar de nuevo')}</button></div>:<>
             <p className="chat-action-text">{t(`Tests passed. Apply the verified changes to ${projectName}?`,`Los tests han pasado. ¿Aplico los cambios a ${projectName}?`)}{projectKind==='existing'?t(' This will write to your registered project.',' Esto escribirá en tu proyecto registrado.'):''}</p>
             <div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>void defer(item.id,'apply')}>{t('Not now','Ahora no')}</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void apply(item.id)}><Check size={13}/> {t('Accept changes','Aceptar cambios')}</button></div>
