@@ -10,9 +10,13 @@ import signal
 import struct
 import subprocess
 import termios
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import WebSocket
+
+from cmf_dev_studio.projects.models import Project
+from cmf_dev_studio.projects.python_environment import environment_info
 
 
 def allowed_local_origin(ws: WebSocket) -> bool:
@@ -24,6 +28,30 @@ def allowed_local_origin(ws: WebSocket) -> bool:
         and origin.port in (5173, 8000)
         and host in ("127.0.0.1", "localhost")
     )
+
+
+def terminal_environment(project: Project) -> dict[str, str]:
+    """Prepare a shell environment without changing the backend process."""
+    env = {**os.environ, "TERM": "xterm-256color"}
+    info = environment_info(project)
+    if not info["supported"] or not info["available"]:
+        return env
+
+    interpreter = Path(info["path"])
+    bin_dir = interpreter.parent
+    previous = env.pop("VIRTUAL_ENV", None)
+    env.pop("VIRTUAL_ENV_PROMPT", None)
+    env.pop("PYTHONHOME", None)
+    paths = env.get("PATH", os.defpath).split(os.pathsep)
+    excluded = {str(bin_dir)}
+    if previous:
+        excluded.add(str(Path(previous) / "bin"))
+    env["PATH"] = os.pathsep.join(
+        [str(bin_dir), *(path for path in paths if path not in excluded)]
+    )
+    if (bin_dir.parent / "pyvenv.cfg").is_file():
+        env["VIRTUAL_ENV"] = str(bin_dir.parent)
+    return env
 
 
 async def terminal_socket(ws: WebSocket, manager) -> None:
@@ -47,7 +75,7 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
             stdin=slave,
             stdout=slave,
             stderr=slave,
-            env={**os.environ, "TERM": "xterm-256color"},
+            env=terminal_environment(project),
             start_new_session=True,
             close_fds=True,
         )
