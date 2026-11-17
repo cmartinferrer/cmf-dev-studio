@@ -7,6 +7,21 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-17
+
+### Changed
+
+- Resolve the API version dynamically from Python package metadata.
+- Resolve the frontend version dynamically from package.json.
+
+### Fixed
+
+- Correct the API version mismatch introduced in v0.2.0.
+
+### Added
+
+- Regression test to ensure the API version matches the installed package version.
+
 ## [0.2.0] - 2026-11-16
 
 ### Added
@@ -51,5 +66,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - GitHub Actions CI, dependency security auditing and secret scanning.
 
 [Unreleased]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.0...HEAD
+[0.2.1]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cmartinferrer/cmf-dev-studio/releases/tag/v0.1.0
