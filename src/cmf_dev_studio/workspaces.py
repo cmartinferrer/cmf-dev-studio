@@ -525,6 +525,19 @@ class WorkspaceService:
             if not allow:
                 with self._db() as db:
                     self._event(db, proposal_id, "exploration_denied")
+                    self._event(
+                        db,
+                        proposal_id,
+                        "assistant_response",
+                        action="answer",
+                        message=(
+                            "No exploraré el proyecto. Puedes adjuntar los ficheros "
+                            "relevantes o aportar más información para continuar."
+                            if row["assistant_language"] == "Spanish"
+                            else "I will not explore the project. You can attach relevant "
+                            "files or provide more information to continue."
+                        ),
+                    )
                 self._update(proposal_id, "answered")
                 return self.get(proposal_id)
             baseline = self.baselines / proposal_id
@@ -554,14 +567,10 @@ class WorkspaceService:
             ).start()
             return self.get(proposal_id)
 
-    def _investigate(self, proposal_id, client, task, context, original, row):
-        def activity(action, query):
-            with self._db() as db:
-                self._event(
-                    db, proposal_id, "exploration_tool", stage=action, query=query
-                )
-
+    def _investigation_history(self, proposal_id, row):
+        """Keep user intent but omit answers from different project snapshots."""
         history = []
+        current_digest = tree_digest(self.baselines / proposal_id)
         for previous in reversed(self.list(row["project_id"])[:8]):
             if (
                 previous["id"] == proposal_id
@@ -573,12 +582,31 @@ class WorkspaceService:
                 for e in previous["events"]
                 if e["kind"] == "assistant_response"
             ]
+            baseline = self.baselines / previous["id"]
+            # Historical answers are evidence only for the snapshot they described.
+            try:
+                unchanged = (
+                    baseline.is_dir() and tree_digest(baseline) == current_digest
+                )
+            except (OSError, WorkspaceError):
+                unchanged = False
             history.append(
                 {
                     "task": previous["task"][:2000],
-                    "response": "\n".join(messages)[-2000:],
+                    "response": "\n".join(messages)[-2000:] if unchanged else "",
+                    "snapshot_unchanged": unchanged,
                 }
             )
+        return history
+
+    def _investigate(self, proposal_id, client, task, context, original, row):
+        def activity(action, query):
+            with self._db() as db:
+                self._event(
+                    db, proposal_id, "exploration_tool", stage=action, query=query
+                )
+
+        history = self._investigation_history(proposal_id, row)
         investigator = Investigator(
             client,
             original,
@@ -637,10 +665,16 @@ class WorkspaceService:
         project = self.manager.get(proposal["project_id"])
         if project is None:
             raise WorkspaceError("Project not found")
-        original = project.path / relative
+        # Applied proposals are historical diffs, not pending edits.
+        source_root = (
+            self.baselines / proposal_id
+            if proposal["status"] == "applied"
+            else project.path
+        )
+        original = source_root / relative
         # No symlinks: neither the project tree nor the isolated proposal tree.
         if original.is_symlink() or any(
-            (project.path / Path(*relative.parts[:i])).is_symlink()
+            (source_root / Path(*relative.parts[:i])).is_symlink()
             for i in range(1, len(relative.parts))
         ):
             raise WorkspaceError("Unsafe original path")
@@ -824,7 +858,12 @@ class WorkspaceService:
                         proposal_id,
                     ),
                 )
-            if stage in ("analyst", "developer", "tester", "developer_repair"):
+            if plan is None and stage in (
+                "analyst",
+                "developer",
+                "tester",
+                "developer_repair",
+            ):
                 self._event(db, proposal_id, "agent_stage", stage=stage)
 
     def _write_operations(
