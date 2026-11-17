@@ -7,6 +7,31 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-17
+
+### Added
+
+- Per-project Python environment management, including virtual environment creation with uv and selection of existing interpreters.
+- Per-project JDK detection, selection and persistence for Java and Kotlin projects.
+- Python interpreter and JDK controls in the workspace status bar.
+- Isolated Python test environments using the selected project interpreter and declared dependencies.
+- Maven and Gradle Wrapper support, prioritizing project wrappers over globally installed build tools.
+- Chat-driven Python dependency preparation and JVM project compilation and testing, with explicit user approval.
+- Integrated editor execution for Python scripts, Java and Kotlin applications, and supported JVM test classes.
+- Run, Stop and Run again actions, execution status, terminal output and process exit codes.
+- Automated regression tests for environment management, terminal integration, project runners, dependency preparation and editor execution.
+
+### Changed
+
+- Integrated project-specific Python and JDK environments into the local terminal and multi-agent test workflow.
+- Improved terminal font fallback support for Powerline glyphs.
+- Updated the README to document project environments, dependency preparation, editor execution and current limitations.
+
+### Fixed
+
+- Prevented terminals from inheriting the Studio Python virtual environment when no project interpreter is selected.
+- Preserved selected project environments during shell initialization without modifying the user's global shell configuration.
+
 ## [0.2.1] - 2026-11-17
 
 ### Changed
@@ -65,7 +90,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - SQLite persistence for project and proposal data.
 - GitHub Actions CI, dependency security auditing and secret scanning.
 
-[Unreleased]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/cmartinferrer/cmf-dev-studio/releases/tag/v0.1.0
