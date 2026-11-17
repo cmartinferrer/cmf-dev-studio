@@ -33,21 +33,21 @@ def allowed_local_origin(ws: WebSocket) -> bool:
 def terminal_environment(project: Project) -> dict[str, str]:
     """Prepare a shell environment without changing the backend process."""
     env = {**os.environ, "TERM": "xterm-256color"}
+    previous = env.pop("VIRTUAL_ENV", None)
+    env.pop("VIRTUAL_ENV_PROMPT", None)
+    env.pop("PYTHONHOME", None)
+    paths = env.get("PATH", os.defpath).split(os.pathsep)
+    if previous:
+        paths = [path for path in paths if path != str(Path(previous) / "bin")]
+    env["PATH"] = os.pathsep.join(paths)
     info = environment_info(project)
     if not info["supported"] or not info["available"]:
         return env
 
     interpreter = Path(info["path"])
     bin_dir = interpreter.parent
-    previous = env.pop("VIRTUAL_ENV", None)
-    env.pop("VIRTUAL_ENV_PROMPT", None)
-    env.pop("PYTHONHOME", None)
-    paths = env.get("PATH", os.defpath).split(os.pathsep)
-    excluded = {str(bin_dir)}
-    if previous:
-        excluded.add(str(Path(previous) / "bin"))
     env["PATH"] = os.pathsep.join(
-        [str(bin_dir), *(path for path in paths if path not in excluded)]
+        [str(bin_dir), *(path for path in paths if path != str(bin_dir))]
     )
     if (bin_dir.parent / "pyvenv.cfg").is_file():
         env["VIRTUAL_ENV"] = str(bin_dir.parent)

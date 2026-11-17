@@ -57,11 +57,19 @@ def test_system_interpreter_is_not_a_virtual_environment(tmp_path, monkeypatch):
     assert "VIRTUAL_ENV" not in env
 
 
-def test_unconfigured_and_non_python_projects_keep_existing_environment(tmp_path):
-    """No interpreter or a non-Python project preserves existing shell behavior."""
+def test_unconfigured_and_non_python_projects_use_system_environment(
+    tmp_path, monkeypatch
+):
+    """No interpreter or a non-Python project must not inherit the IDE venv."""
     manager = ProjectManager(tmp_path)
     project = manager.create("Demo", language=ProjectLanguage.PYTHON)
-    expected = {**os.environ, "TERM": "xterm-256color"}
+    monkeypatch.setenv("PATH", "/ide/bin:/usr/bin")
+    monkeypatch.setenv("VIRTUAL_ENV", "/ide")
+    monkeypatch.setenv("VIRTUAL_ENV_PROMPT", "ide")
+    monkeypatch.setenv("PYTHONHOME", "/ide")
+    expected = {**os.environ, "TERM": "xterm-256color", "PATH": "/usr/bin"}
+    for key in ("VIRTUAL_ENV", "VIRTUAL_ENV_PROMPT", "PYTHONHOME"):
+        expected.pop(key)
     assert terminal_environment(project) == expected
     make_venv(project.path / ".venv")
     for language in (ProjectLanguage.JAVA, ProjectLanguage.KOTLIN):
