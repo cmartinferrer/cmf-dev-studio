@@ -26,7 +26,8 @@ import { updateProjectLanguage, type ProjectLanguage, listProjectFiles, openEdit
 import AIChat from './AIChat';
 import ProjectLanguageIcon from './ProjectLanguageIcon';
 import WorkspaceStatusBar from './WorkspaceStatusBar';
-import TerminalPanel from './TerminalPanel';
+import TerminalWorkspace from './TerminalWorkspace';
+import { initialSessions, addSession } from './terminalSessions';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare } from 'lucide-react';
 
 type Tab = { path: string; content: string; saved: string; sha256: string | null; dirty: boolean; isNew: boolean };
@@ -151,14 +152,19 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     const items=topPaths(paths);setResource({copy:()=>copySelection(items),initialAction:direct?'delete':undefined,name:`${items.length} items`,x,y,removeLabel:`Delete ${items.length} items`,warning:`Permanently delete ${items.join(', ')}? Folder contents will also be deleted.`,remove:()=>changeEntries(items,null)});
   }
   const [bottom,setBottom]=useState(false);
-  const [runRequest,setRunRequest]=useState<{path:string;id:number}|null>(null);
-  const [terminalConnected,setTerminalConnected]=useState(false);
-  function closeTerminal(){setBottom(false);setRunRequest(null);setTerminalConnected(false);}
+  const [terminalSessions,setTerminalSessions]=useState(initialSessions);
+  function closeTerminal(){setBottom(false);}
+  function openTerminal(){setTerminalSessions(s=>s.sessions.length?s:addSession(s));setBottom(true);}
+  const runPending=useRef(false);
   async function runFile(path:string){
     const tab=tabsRef.current.find(t=>t.path===path);
-    if(!tab||terminalConnected||busy)return;
-    if((tab.dirty||tab.isNew)&&!await save(path))return;
-    setRunRequest(old=>({path,id:(old?.id??0)+1}));setBottom(true);setTerminalConnected(true);}
+    if(!tab||busy||runPending.current)return;
+    runPending.current=true;
+    try{
+      if((tab.dirty||tab.isNew)&&!await save(path))return;
+      setTerminalSessions(s=>addSession(s,path));setBottom(true);
+    }finally{runPending.current=false;}
+  }
   const [explorerVisible,setExplorerVisible]=useState(true);
   const [assistantVisible,setAssistantVisible]=useState(true);
   const [explorerWidth,setExplorerWidth]=useState(225);
@@ -235,20 +241,22 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
       <div className="ide-tree" ref={treeRef} onKeyDown={e=>{explorerKeys(e);if(e.key==='Escape'){setSelection([]);anchor.current=null;}if(e.key==='Delete'&&selection.length&&!busy){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();deleteSelection(selection,rect.left,rect.top,true);}}}><FolderTree projectId={project.id} onOpen={p=>void open(p)} revision={revision} onMenu={entryMenu} dragged={dragged} onDrag={p=>{setDragged(p?topPaths(selection.includes(p)?selection:[p]):[]);if(p&&!selection.includes(p))setSelection([p]);if(!p)setRootOver(false);}} selection={selection} revealParent={revealParent} onSelect={selectEntry} onMove={(p,d)=>void move(p,d)}/></div>
     </aside>}
     {explorerVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize explorer" onPointerDown={e=>startResize(e,"explorer")}/>}
-    <section className="ide-center"><div className="ide-quickbar"><button title="Toggle explorer" onClick={()=>setExplorerVisible(v=>!v)}>{explorerVisible?<PanelLeftClose size={15}/>:<PanelLeftOpen size={15}/>}</button><span>{project.name}</span><div><button onClick={()=>bottom?closeTerminal():setBottom(true)}><TerminalSquare size={14}/> Terminal</button><button title="Toggle AI assistant" onClick={()=>setAssistantVisible(v=>!v)}>{assistantVisible?<PanelRightClose size={15}/>:<PanelRightOpen size={15}/>}</button></div></div>{review?<><div className="ide-tabs"><div className="ide-tab ide-tab-active"><button><FileCode size={14}/>Review: {review.path}</button><button title="Close review" onClick={()=>setReview(null)}><X size={13}/></button></div></div><div className="ide-editor-toolbar"><span>Review changes · {review.path} · Left: current file / Right: proposed</span><button onClick={()=>setReview(null)}>Close review</button></div><div className="ide-editor"><DiffEditor theme="vs-dark" language={language(review.path)} original={review.before} modified={review.after} options={{readOnly:true,renderSideBySide:true,automaticLayout:true,minimap:{enabled:false},scrollBeyondLastLine:false}}/></div></>:null}
+    <section className="ide-center"><div className="ide-quickbar"><button title="Toggle explorer" onClick={()=>setExplorerVisible(v=>!v)}>{explorerVisible?<PanelLeftClose size={15}/>:<PanelLeftOpen size={15}/>}</button><span>{project.name}</span><div><button onClick={()=>bottom?closeTerminal():openTerminal()}><TerminalSquare size={14}/> Terminal</button><button title="Toggle AI assistant" onClick={()=>setAssistantVisible(v=>!v)}>{assistantVisible?<PanelRightClose size={15}/>:<PanelRightOpen size={15}/>}</button></div></div>{review?<><div className="ide-tabs"><div className="ide-tab ide-tab-active"><button><FileCode size={14}/>Review: {review.path}</button><button title="Close review" onClick={()=>setReview(null)}><X size={13}/></button></div></div><div className="ide-editor-toolbar"><span>Review changes · {review.path} · Left: current file / Right: proposed</span><button onClick={()=>setReview(null)}>Close review</button></div><div className="ide-editor"><DiffEditor theme="vs-dark" language={language(review.path)} original={review.before} modified={review.after} options={{readOnly:true,renderSideBySide:true,automaticLayout:true,minimap:{enabled:false},scrollBeyondLastLine:false}}/></div></>:null}
       <div ref={splitRef} className={`ide-editor-groups ${layout.direction==='down'?'ide-editor-groups-down':''}`} style={review?{display:'none'}:undefined}>
       {layout.groups.map((group,index)=>{const selected=tabs.find(t=>t.path===group.active);return <div key={group.id} className="ide-editor-group-slot" style={{flex:layout.groups.length===1?'1':index===0?`${splitRatio} 1 0`:`${100-splitRatio} 1 0`}}>
         {index>0&&<div className="ide-editor-split-handle" role="separator" aria-label="Resize editor groups" onPointerDown={resizeSplit}/>}
         <div className={`ide-editor-group ${layout.focused===group.id?'ide-editor-group-focused':''}`} onFocusCapture={()=>setLayout(old=>old.focused===group.id?old:{...old,focused:group.id})} onPointerDown={()=>setLayout(old=>old.focused===group.id?old:{...old,focused:group.id})} onDragOver={e=>{if(tabDrag.current){e.preventDefault();e.dataTransfer.dropEffect='move';}}} onDrop={e=>{const drag=tabDrag.current;if(!drag)return;e.preventDefault();setLayout(old=>moveTab(old,drag.id,group.id,drag.path));tabDrag.current=null;}}>
         <div className="ide-tabs">{group.paths.map(path=>{const t=tabs.find(t=>t.path===path);return t&&<div key={path} draggable onDragStart={e=>{tabDrag.current={id:group.id,path};e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',path);}} onDragEnd={()=>{tabDrag.current=null;}} onContextMenu={e=>{e.preventDefault();setTabMenu({id:group.id,path,x:e.clientX,y:e.clientY});}} className={`ide-tab ${path===group.active?'ide-tab-active':''}`}><button title={path} onClick={()=>setLayout(old=>activate(old,path,group.id))}><FileCode size={14}/>{path.split('/').pop()}{t.dirty?' ●':''}</button><button title="Close tab" onClick={()=>close(path,group.id)}><X size={13}/></button></div>;})}{layout.groups.length>1&&<button className="ide-close-group" title="Close editor group" onClick={()=>setLayout(old=>closeGroup(old,group.id))}><X size={14}/></button>}</div>
-        {selected?<><div className="ide-editor-toolbar"><span title={selected.path}>{selected.path}</span><div>{(/\.(py|java|kt)$/i.test(selected.path))&&<button title={terminalConnected?'Stop the current terminal before running':selected.dirty||selected.isNew?'Save and run file':'Run file'} disabled={busy||terminalConnected} onClick={()=>void runFile(selected.path)}><Play size={15} color="#4ade80"/> Run</button>}<button title="Save (Ctrl+S)" disabled={busy||!selected.dirty} onClick={()=>void save(selected.path)}><Save size={15}/> Save</button><button title="File actions" disabled={busy||selected.isNew} onClick={e=>entryMenu(e,selected.path,true)}><MoreHorizontal size={15}/></button></div></div>
+        {selected?<><div className="ide-editor-toolbar"><span title={selected.path}>{selected.path}</span><div>{(/\.(py|java|kt)$/i.test(selected.path))&&<button title={selected.dirty||selected.isNew?'Save and run file':'Run file'} disabled={busy} onClick={()=>void runFile(selected.path)}><Play size={15} color="#4ade80"/> Run</button>}<button title="Save (Ctrl+S)" disabled={busy||!selected.dirty} onClick={()=>void save(selected.path)}><Save size={15}/> Save</button><button title="File actions" disabled={busy||selected.isNew} onClick={e=>entryMenu(e,selected.path,true)}><MoreHorizontal size={15}/></button></div></div>
         <div className="ide-editor"><Editor theme="vs-dark" path={modelPath(selected.path)} keepCurrentModel language={language(selected.path)} value={selected.content} options={{fontSize:13,minimap:{enabled:false},automaticLayout:true,scrollBeyondLastLine:false}} onMount={editor=>{editor.onDidFocusEditorText(()=>setLayout(old=>old.focused===group.id?old:{...old,focused:group.id}));}} onChange={value=>setTabs(prev=>prev.map(t=>t.path===selected.path&&t.content!==(value??'')?{...t,content:value??'',dirty:t.isNew||(value??'')!==t.saved}:t))}/></div></>:<div className="ide-welcome"><FileCode size={36}/><h2>{project.name}</h2><p>Choose a file from Explorer, or create a new file to start editing.</p><p>Ctrl+S to save · AI assistant on the right</p></div>}
         </div></div>;})}
       </div>
       {tabMenu&&<div className="ide-tab-menu" style={{left:Math.min(tabMenu.x,window.innerWidth-160),top:Math.min(tabMenu.y,window.innerHeight-90)}}><button onClick={()=>{setLayout(old=>split(activate(old,tabMenu.path,tabMenu.id),tabMenu.path,'right'));setSplitRatio(50);setTabMenu(null);}}>Split Right</button><button onClick={()=>{setLayout(old=>split(activate(old,tabMenu.path,tabMenu.id),tabMenu.path,'down'));setSplitRatio(50);setTabMenu(null);}}>Split Down</button></div>}
       {project.read_only&&<label className="ide-write-authorization"><input type="checkbox" checked={authorized} onChange={e=>setAuthorized(e.target.checked)}/> Allow manual edits to this registered project (writes directly to disk)</label>}
       {(error||message)&&<div className={`ide-notification ${error?'ide-error':''}`}>{error?<CircleAlert size={15}/>:<Save size={15}/>} {error||message}<button onClick={()=>{setError('');setMessage('');}}><X size={14}/></button></div>}
-      {bottom&&<><div className="ide-resize-horizontal" role="separator" aria-label="Resize terminal" onPointerDown={e=>startResize(e,"terminal")}/><div className="ide-terminal-panel" style={{height:terminalHeight}}><div className="ide-terminal-header"><strong>TERMINAL</strong><button onClick={closeTerminal} title="Close terminal"><X size={14}/></button></div><TerminalPanel key={`${project.id}:${runRequest?.id??0}`} projectId={project.id} runPath={runRequest?.path} onConnectionChange={setTerminalConnected}/></div></>}
+      {bottom&&<div className="ide-resize-horizontal" role="separator" aria-label="Resize terminal" onPointerDown={e=>startResize(e,"terminal")}/>}
+      <TerminalWorkspace projectId={project.id} visible={bottom} height={terminalHeight} state={terminalSessions} setState={setTerminalSessions} onHide={closeTerminal}/>
+
     </section>
     {assistantVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize AI panel" onPointerDown={e=>startResize(e,"assistant")}/>}
     {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant</div>
