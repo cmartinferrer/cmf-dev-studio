@@ -59,7 +59,9 @@ def select_runner(workspace: Path, python: str | None = None) -> RunnerSpec:
     )
 
 
-def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
+def execute_runner(
+    workspace: Path, spec: RunnerSpec, *, in_place: bool = False
+) -> tuple[bool, str]:
     # A disposable copy protects against ordinary build artifacts, not hostile code.
     env = {
         k: v
@@ -117,8 +119,9 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
         )
     try:
         with TemporaryDirectory(prefix="cmf-test-") as directory:
-            root = Path(directory) / "project"
-            shutil.copytree(workspace, root)
+            root = workspace if in_place else Path(directory) / "project"
+            if not in_place:
+                shutil.copytree(workspace, root)
             with subprocess.Popen(
                 spec.command,
                 cwd=root,

@@ -26,6 +26,7 @@ from cmf_dev_studio.project_runners import (
     select_runner,
 )
 from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
+from cmf_dev_studio.projects.jvm_preparation import preparation_spec, prepare_jvm
 from cmf_dev_studio.projects.manager import ProjectManager
 from cmf_dev_studio.projects.models import ProjectLanguage
 from cmf_dev_studio.projects.python_environment import (
@@ -343,38 +344,48 @@ class WorkspaceService:
         )
 
     def prepare_python(self, proposal_id: str, confirmed: bool) -> dict:
-        """Record the user's setup decision and result in the existing conversation."""
+        """Record an approved Python or JVM setup in the existing conversation."""
         with _APPLY_LOCK:
             row = self.get(proposal_id)
-            events = [
-                e["kind"] for e in row["events"] if e["kind"].startswith("environment_")
-            ]
+            events = [e for e in row["events"] if e["kind"].startswith("environment_")]
             if (
                 row["status"] != "applied"
                 or not events
-                or events[-1] not in {"environment_offered", "environment_failed"}
+                or events[-1]["kind"]
+                not in {"environment_offered", "environment_failed"}
             ):
                 raise WorkspaceError("No pending environment preparation")
             project = self.manager.get(row["project_id"])
             if project is None:
                 raise WorkspaceError("Project no longer exists")
+            kind = events[-1]["details"].get("environment", "python")
             with self._db() as db:
                 self._event(
                     db,
                     proposal_id,
                     "environment_approved" if confirmed else "environment_skipped",
+                    environment=kind,
                 )
             if confirmed:
                 try:
-                    prepare_environment(project)
+                    if kind == "jvm":
+                        prepare_jvm(project)
+                    else:
+                        prepare_environment(project)
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     with self._db() as db:
                         self._event(
-                            db, proposal_id, "environment_failed", error=str(exc)
+                            db,
+                            proposal_id,
+                            "environment_failed",
+                            error=str(exc),
+                            environment=kind,
                         )
                 else:
                     with self._db() as db:
-                        self._event(db, proposal_id, "environment_ready")
+                        self._event(
+                            db, proposal_id, "environment_ready", environment=kind
+                        )
             return self.get(proposal_id)
 
     def defer(self, proposal_id: str, action: str) -> dict:
@@ -1138,7 +1149,11 @@ def _apply_proposal(
                     (proposal_id,),
                 )
                 self._event(db, proposal_id, "changes_applied", count=len(changes))
-                if preparation_needed(project, changes):
+                if preparation_spec(project):
+                    self._event(
+                        db, proposal_id, "environment_offered", environment="jvm"
+                    )
+                elif preparation_needed(project, changes):
                     self._event(db, proposal_id, "environment_offered")
         except Exception:
             for target, old in reversed(touched):
