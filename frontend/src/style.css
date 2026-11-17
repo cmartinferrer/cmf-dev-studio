@@ -163,3 +163,6 @@
 .python-environment-primary,.python-environment-secondary{border:1px solid #6e5bd0;border-radius:6px;background:#6352c4;color:white;padding:8px 12px;font:inherit;cursor:pointer}.python-environment-secondary{background:#263650;border-color:#455574;color:#dce5f4}.python-environment-primary:hover{background:#765cde}.python-environment-secondary:hover{background:#35445e}.python-environment-menu button:disabled{opacity:.5;cursor:not-allowed}
 .python-environment-advanced{display:flex;flex-direction:column;gap:6px;border-top:1px solid #354158;padding-top:8px}.python-environment-path{margin:3px 0}.python-environment-path input{display:block;width:100%;box-sizing:border-box;margin-top:5px;padding:7px;background:#111827;color:#e2e8f0;border:1px solid #354158;border-radius:5px}
 .python-environment-confirm{font-size:12px;padding:9px;border:1px solid #354158;border-radius:6px;overflow-wrap:anywhere}.python-environment-confirm p{margin:0 0 9px;line-height:1.5}.python-environment-actions{display:flex;gap:6px}.python-environment-note{border-top:1px solid #354158;padding-top:7px}
+
+.ide-new-file small{color:#a7b6cf;font-size:11px;overflow-wrap:anywhere}
+.resource-menu{max-height:calc(100vh - 8px);overflow-y:auto}
