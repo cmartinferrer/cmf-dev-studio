@@ -4,9 +4,9 @@
 
 CMF Dev Studio is an open-source, local-first, browser-based development environment that combines an integrated code editor, a multi-agent AI assistant and approved local testing. It helps developers evolve existing repositories or create new projects while retaining control over the files shared with AI and the changes applied to their code.
 
-[![CI](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![Dependency Security](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https://img.shields.io/badge/version-0.2.1-blue) ![Python](https://img.shields.io/badge/Python-3.10%2B-blue) ![React](https://img.shields.io/badge/React-19-61DAFB) 
+[![CI](https\://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml/badge.svg?branch=main)](https\://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/ci.yml) [![Dependency Security](https\://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml/badge.svg?branch=main)](https\://github.com/cmartinferrer/cmf-dev-studio/actions/workflows/security.yml) [![License: MIT](https\://img.shields.io/badge/License-MIT-green.svg)](LICENSE) ![Version](https\://img.shields.io/badge/version-0.3.0-blue) ![Python](https\://img.shields.io/badge/Python-3.10%2B-blue) ![React](https\://img.shields.io/badge/React-19-61DAFB)
 
-> **Development status:** Alpha. The Python, Java and Kotlin reference workflows have been validated end to end. The project is actively evolving; review the current limitations before using it with important repositories.
+> **Development status:** Alpha. The Python, Java and Kotlin development workflows have been validated end to end, including project environments, approved testing, preparation and editor execution. The project is actively evolving; review the current limitations before using it with important repositories.
 
 ## Contents
 
@@ -46,7 +46,11 @@ The project remains an ongoing learning and engineering initiative. By releasing
 - **File management:** create, rename, delete, move, copy and paste files and folders; drag and drop, multi-selection and automatic numbered copies prevent accidental overwrites.
 - **AI-assisted development:** describe a change in natural language and receive a repository-level proposal with requirements, acceptance criteria and file diffs.
 - **Single orchestrator:** Analyst, Developer and Tester collaborate through one language-independent workflow.
-- **Multi-language testing:** automatic runner selection for Python/pytest, Java/Maven and Kotlin/Gradle.
+- **Project environments:** select or create Python virtual environments with uv, or select a locally installed JDK for Java and Kotlin. Settings are persisted per project.
+- **Integrated execution:** project-specific environments are used by the terminal and agent test runners. Bash and Zsh initialization preserves the selected environment without editing personal shell configuration.
+- **Multi-language testing:** automatic runner selection for Python/pytest, Java/Maven and Kotlin/Gradle, with priority given to existing Maven and Gradle wrappers.
+- **Project preparation:** explicitly approve dependency installation for Python or compilation and tests for JVM managed projects after applying changes.
+- **Run from the editor:** execute Python scripts, conventional Java and Kotlin entry points and JVM test classes, with terminal output, exit codes, Stop and Run again.
 - **Iterative review:** bounded functional review and test-quality guidance; failed tests can trigger a user-requested repair, with fresh approval before executing a changed proposal.
 - **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider. The active file is suggested automatically; additional files can be selected manually or through the explorer.
 - **Conversational workflow:** inline approvals, persisted chat history and retries with original or updated context.
@@ -60,7 +64,10 @@ flowchart TD
     UI[React IDE] --> API[FastAPI REST and WebSocket API]
     API --> WS[Workspace service]
     API --> PM[Project manager and editor services]
-    API --> PTY[Local terminal]
+    API --> PTY[Local terminal and editor execution]
+    PM --> ENV[Project environment management]
+    ENV --> PTY
+    ENV --> R
     WS --> O[Orchestrator]
     O --> A[Analyst agent]
     O --> D[Developer agent]
@@ -88,8 +95,8 @@ flowchart TD
 | `contracts.py` | Defines structured response contracts and parsing. |
 | `workflow.py` | Defines technology identification and retry policy. |
 | `workspaces.py` | Manages proposal lifecycle, snapshots, persistence, permissions and safe application. |
-| `project_runners.py` | Selects and executes native test adapters. |
-| `projects/` | Manages project registration, browsing, context discovery and editor operations. |
+| `project_runners.py` | Selects and executes native test adapters using project environments and available build wrappers. |
+| `projects/` | Manages project registration, browsing, context discovery, editor operations, environment selection and project execution support. |
 | `llm/` | Defines the provider interface and Gemini adapter. |
 | `api/` | Exposes local REST and terminal WebSocket endpoints. |
 | `frontend/` | Provides the browser-based IDE and proposal review experience. |
@@ -127,13 +134,15 @@ Generation and testing are separate phases of a persisted proposal. Failed tests
 
 ## Supported languages
 
-| Language | Detection | Test runner | Runtime |
+| Language | Detection | Test runner | Reference runtime |
 | --- | --- | --- | --- |
-| Python | Python source files | pytest | Python 3.12 |
-| Java | Root `pom.xml` | Maven 3.9 | JDK 21 |
-| Kotlin / Java | Root `build.gradle.kts` or `build.gradle` | Gradle 8.14 | JDK 21 |
+| Python | Python source files | pytest via uv | Python 3.12 |
+| Java | Root `pom.xml` | Maven / Maven Wrapper | JDK 17 or 21 |
+| Kotlin / Java | Root `build.gradle.kts` or `build.gradle` | Gradle / Gradle Wrapper | JDK 21 |
 
-The Maven and Gradle adapters require test sources under `src/test/`. The Gradle reference project uses Kotlin. Runner selection prioritizes Maven, then Gradle, then Python. Commands execute using locally installed tools after explicit approval. Maven and Gradle can resolve dependencies over the network. Python verification currently uses the Studio Python environment; independent project environments and automated dependency preparation are not yet implemented. The versions in the table describe reference workflows, not mandatory versions for every project.
+The Maven and Gradle adapters require test sources under `src/test/`. The Gradle reference project uses Kotlin. Runner selection prioritizes Maven, then Gradle, then Python. Existing wrappers take precedence over globally installed build tools. Commands execute locally after explicit approval and can resolve dependencies over the network.
+
+Python agent tests use isolated uv environments with the selected project interpreter when configured. Java and Kotlin runners use the selected JDK through `JAVA_HOME` and `PATH`. The reference versions are not mandatory for every project; the selected runtime must be compatible with the project's build configuration.
 
 ## Technology stack
 
@@ -143,7 +152,7 @@ The Maven and Gradle adapters require test sources under `src/test/`. The Gradle
 | Frontend | React, TypeScript, Vite, Lucide |
 | Editor and terminal | Monaco Editor, xterm.js, local PTY |
 | AI | Google Gemini SDK, structured JSON responses |
-| Execution | pytest, Maven, Gradle |
+| Execution | uv, pytest, Maven, Gradle, Maven Wrapper, Gradle Wrapper |
 | Tooling | uv, npm, pytest, Ruff |
 
 ## Getting started
@@ -152,7 +161,7 @@ The Maven and Gradle adapters require test sources under `src/test/`. The Gradle
 
 - Python 3.10 or newer and a compatible version of uv.
 - Node.js 20 or 22 and npm.
-- Native build tools for the languages you use.
+- A compatible Python interpreter or JDK for the languages you use; Maven or Gradle if the project does not provide a corresponding wrapper.
 - A Gemini API key and access to the model configured in `src/cmf_dev_studio/llm/gemini.py`.
 - A POSIX development environment (Linux or macOS) for the integrated PTY terminal.
 
@@ -175,7 +184,7 @@ cd ..
 
 ### Native test tools
 
-Install Maven and JDK 21 for Java, Gradle for Kotlin, and uv/pytest for Python as needed. Commands run locally with network access after explicit approval in chat. No runner images are required.
+Install compatible JDKs for Java and Kotlin and use existing Maven or Gradle wrappers where available. Otherwise, make the corresponding build tool available on the backend PATH. Python uses uv for environment management and test execution. Commands run locally with network access after explicit approval in chat. No runner images are required. The IDE does not automatically install JDKs, Maven or Gradle globally.
 
 ### Run the application
 
@@ -194,7 +203,7 @@ cd frontend
 npm run dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The frontend proxies API and WebSocket requests to port 8000. API documentation is available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+Open [http\://127.0.0.1:5173](http\://127.0.0.1:5173). The frontend proxies API and WebSocket requests to port 8000. API documentation is available at [http\://127.0.0.1:8000/docs](http\://127.0.0.1:8000/docs).
 
 ## Using the IDE
 
@@ -205,9 +214,31 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The frontend proxies API an
 5. Review the test output. If verification fails, inspect the error and request a repair when appropriate. A changed proposal requires fresh execution approval. Generation retries can reuse the original context or use an explicitly approved replacement.
 6. Accept verified changes explicitly using the inline **Accept changes** action, including explicit authorization for registered projects. No project-name confirmation is required.
 
+7. For managed projects, optionally approve project preparation after applying changes. Python preparation creates or reuses a project virtual environment and installs declared dependencies; JVM preparation compiles and tests the actual project.
+8. Open a supported source or test file and use **Run** to execute it in the integrated terminal. Use **Stop** or **Run again** to control the execution.
+
 ### Project programming language
 
 New managed projects can select Python, Java or Kotlin. The setting is persisted and supplied to the agents during proposal generation. Existing projects may use automatic detection. Runner selection still follows the build files; the language setting is not a security restriction.
+
+### Project environments
+
+Use the workspace status bar to configure the environment for the current project.
+
+- **Python:** detect an existing `.venv`, create a virtual environment using uv or select an existing interpreter. Agent verification uses an isolated environment rather than installing proposed dependencies into the Studio environment.
+- **Java and Kotlin:** detect locally installed JDKs and select the desired version. The selected JDK is used by the terminal, agent runners, project preparation and editor execution.
+
+Environment settings are persisted per project. Restart the integrated terminal after changing an environment. The IDE preserves personal Bash and Zsh configuration and does not change the system default runtime.
+
+### Project preparation
+
+After accepting a proposal in a managed project, the assistant can offer to prepare it. This is optional and requires explicit approval. Python preparation installs declared dependencies into the managed project environment. JVM preparation runs the appropriate Maven or Gradle build and tests in the actual project, using its selected JDK and wrapper when available. Unlike proposal verification, preparation can create build artifacts in the original workspace.
+
+### Running code from the editor
+
+Open and save a supported file, then select **Run**. Python scripts execute with the project interpreter. Conventional Java and Kotlin entry points are compiled and executed through the project's build tool; JVM test classes run through Maven or Gradle. Auxiliary JVM classes without a supported entry point are not executable.
+
+The integrated terminal displays process output and exit status, with **Stop** and **Run again** controls. Advanced launch configurations, debugging and complex multi-module builds are not supported in this release.
 
 ### Example: Java calculator
 
@@ -289,7 +320,7 @@ cd frontend
 npm run build
 ```
 
-For end-to-end verification, open each reference project in the IDE, submit a change, authorize context, inspect test results and apply the verified proposal. This requires valid Gemini credentials.
+For end-to-end verification, open each reference project in the IDE, select its environment, submit a change, authorize context, inspect test results and apply the verified proposal. For managed projects, also verify approved preparation. Run supported source files and JVM test classes from the editor and check Stop and Run again. AI-assisted steps require valid Gemini credentials. Automated regression tests cover environment selection, shell startup, runner environments, wrappers, preparation and editor execution.
 
 ## Code quality
 
@@ -328,7 +359,8 @@ Native integration tests and Gemini-powered end-to-end checks are separate from 
 - Approved context and task information are transmitted to Gemini; local-first does not mean offline AI or that all data remains on the machine.
 - Approved test commands run with your user permissions and Internet access in a disposable copy. This is not a security sandbox. Code can access your home directory and network.
 - Applying a proposal requires explicit approval and conflict checks. Local code can still access original repositories.
-- The integrated terminal runs on the host with the user's permissions; it is not sandboxed.
+- The integrated terminal and editor execution run on the host with the user's permissions; they are not sandboxed.
+- Approved project preparation runs in the actual managed project. Dependency installation, Maven and Gradle build scripts and wrappers can execute code and access the network and filesystem. Only approve commands and use wrappers from trusted projects.
 - Use trusted repositories only. This application is not a hardened security boundary for hostile code or multi-tenant deployment.
 
 ### Dependency security
@@ -351,7 +383,9 @@ To add an AI provider, implement the `LLMClient` contract in `llm/`, including s
 
 ## Current limitations
 
-- Only the documented native runner combinations are supported for verification. Python tests currently use the Studio environment; automatic per-project dependency installation and independent execution environments are not implemented. Arbitrary Maven/Gradle dependency graphs and multi-module builds are not guaranteed to work.
+- Only the documented native runner combinations are supported for verification. JVM support focuses on conventional single-module projects; arbitrary dependency graphs, custom source layouts and complex multi-module builds are not guaranteed to work.
+- Project preparation from chat is limited to managed projects. Existing wrappers are supported but are not generated automatically; JDKs and global build tools must be installed separately when needed.
+- Editor execution supports Python scripts, conventional JVM entry points and JVM test classes. Debugging, advanced run configurations and custom program arguments are not supported. JDK selection does not automatically resolve build-specific version requirements.
 - The assistant supports conversational change proposals and retries, but is not yet a general-purpose coding assistant.
 - Explorer copy and move operations are limited to the current project and do not automatically refactor imports or code references.
 - Context discovery and snapshots have size and file-count limits. Generated changes and tests may be incorrect despite successful verification.
@@ -360,7 +394,7 @@ To add an AI provider, implement the `LLMClient` contract in `llm/`, including s
 
 ## Roadmap
 
-Potential next steps include independent project execution environments, approved dependency preparation, richer repository understanding, Git integration and broader runner coverage. These are planned directions, not implemented features.
+Potential next steps include richer repository understanding, Git integration, advanced run configurations, debugging, broader runner coverage and improved support for multi-module JVM projects. These are planned directions, not implemented features.
 
 ## Contributing
 
@@ -372,7 +406,7 @@ Please keep changes focused, run Ruff lint and format checks, include relevant t
 
 **Cristian Martín Ferrer** — Software engineer interested in software architecture, backend development, artificial intelligence and continuous learning.
 
-GitHub: [cmartinferrer](https://github.com/cmartinferrer)
+GitHub: [cmartinferrer](https\://github.com/cmartinferrer)
 
 ## License
 
