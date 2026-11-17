@@ -14,7 +14,18 @@ export default function TerminalPanel({projectId}:{projectId:string}) {
   const [error,setError]=useState('');
   useEffect(()=>{
     if(!container.current)return;
-    const term=new Terminal({cursorBlink:true,convertEol:true,fontSize:12,fontFamily:'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',theme:{background:'#0c1320',foreground:'#d7e1f2'},scrollback:3000});
+    const term=new Terminal({cursorBlink:true,convertEol:true,fontSize:12,fontFamily: [
+    '"JetBrainsMono Nerd Font Mono"',
+    '"MesloLGS NF"',
+    '"Droid Sans Mono for Powerline"',
+    '"Meslo LG M for Powerline"',
+    '"DejaVu Sans Mono for Powerline"',
+    'ui-monospace',
+    'SFMono-Regular',
+    'Menlo',
+    'Consolas',
+    'monospace'
+  ].join(', '),theme:{background:'#0c1320',foreground:'#d7e1f2'},scrollback:3000});
     const addon=new FitAddon();term.loadAddon(addon);term.open(container.current);terminal.current=term;fit.current=addon;
     const resize=()=>{try{addon.fit();if(socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}));}catch{ /* panel not visible yet */ }};
     const observer=new ResizeObserver(resize);observer.observe(container.current);
