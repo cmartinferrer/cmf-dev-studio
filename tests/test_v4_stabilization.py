@@ -55,7 +55,9 @@ def test_review_only_receives_approved_baseline_and_diff():
 
 def test_review_feedback_retries_and_requires_clean_review():
     engine = Orchestrator(Mock())
-    engine.generate_patch = Mock()
+    engine.generate_patch = Mock(
+        return_value=[{"action": "create", "path": "a.py", "content": "x = 1"}]
+    )
     engine.review_patch = Mock()
     operations = [{"action": "create", "path": "app.py", "content": "x=1"}]
     engine.generate_patch.return_value = operations
@@ -72,7 +74,9 @@ def test_review_feedback_retries_and_requires_clean_review():
 
 def test_persistent_review_failure_never_returns_patch():
     engine = Orchestrator(Mock())
-    engine.generate_patch = Mock()
+    engine.generate_patch = Mock(
+        return_value=[{"action": "create", "path": "a.py", "content": "x = 1"}]
+    )
     engine.review_patch = Mock()
     engine.review_patch.return_value = ["missing tests"]
     with pytest.raises(ValueError, match="Tester review unresolved"):

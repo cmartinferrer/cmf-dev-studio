@@ -27,6 +27,7 @@ import AIChat from './AIChat';
 import ProjectLanguageIcon from './ProjectLanguageIcon';
 import WorkspaceStatusBar from './WorkspaceStatusBar';
 import TerminalWorkspace from './TerminalWorkspace';
+import { captureTerminal, type TerminalContext, type TerminalReader } from './terminalContext';
 import { initialSessions, addSession } from './terminalSessions';
 import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare } from 'lucide-react';
 
@@ -153,6 +154,18 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
   }
   const [bottom,setBottom]=useState(false);
   const [terminalSessions,setTerminalSessions]=useState(initialSessions);
+  const terminalReaders=useRef(new Map<number,TerminalReader>()).current;
+  const [terminalContext,setTerminalContext]=useState<TerminalContext[]>([]);
+  const [askTerminal,setAskTerminal]=useState(0);
+  function attachTerminal(id:number,ask=false){
+    const session=terminalSessions.sessions.find(s=>s.id===id);
+    if(!session)return;
+    if(terminalContext.length>=3&&!terminalContext.some(t=>t.id===id)){setError('Attach at most three terminals. Remove an attachment first.');return;}
+    const captured=captureTerminal(id,session.name,terminalReaders.get(id));
+    if(!captured){setError('No terminal output to attach.');return;}
+    setTerminalContext(old=>[...old.filter(t=>t.id!==id),captured].slice(-3));
+    if(ask){setAssistantVisible(true);setAskTerminal(n=>n+1);}
+  }
   function closeTerminal(){setBottom(false);}
   function openTerminal(){setTerminalSessions(s=>s.sessions.length?s:addSession(s));setBottom(true);}
   const runPending=useRef(false);
@@ -255,12 +268,12 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
       {project.read_only&&<label className="ide-write-authorization"><input type="checkbox" checked={authorized} onChange={e=>setAuthorized(e.target.checked)}/> Allow manual edits to this registered project (writes directly to disk)</label>}
       {(error||message)&&<div className={`ide-notification ${error?'ide-error':''}`}>{error?<CircleAlert size={15}/>:<Save size={15}/>} {error||message}<button onClick={()=>{setError('');setMessage('');}}><X size={14}/></button></div>}
       {bottom&&<div className="ide-resize-horizontal" role="separator" aria-label="Resize terminal" onPointerDown={e=>startResize(e,"terminal")}/>}
-      <TerminalWorkspace projectId={project.id} visible={bottom} height={terminalHeight} state={terminalSessions} setState={setTerminalSessions} onHide={closeTerminal}/>
+      <TerminalWorkspace readers={terminalReaders} onAskAI={id=>attachTerminal(id,true)} projectId={project.id} visible={bottom} height={terminalHeight} state={terminalSessions} setState={setTerminalSessions} onHide={closeTerminal}/>
 
     </section>
     {assistantVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize AI panel" onPointerDown={e=>startResize(e,"assistant")}/>}
-    {assistantVisible&&<aside className="ide-ai"><div className="ide-ai-header"><Bot size={17}/> AI Assistant</div>
-      <div className="ide-ai-content"><AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} activePaths={review?[]:visiblePaths(layout).filter(path=>tabs.some(t=>t.path===path&&!t.isNew))} dirtyPaths={tabs.filter(t=>t.dirty).map(t=>t.path)} excluded={excluded} onExclude={path=>{setExcluded(old=>[...new Set([...old,path])]);onApprove(approved.filter(p=>p!==path),null);}} onAddContext={addContext} revision={revision} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)}/></div>
+    {<aside className="ide-ai" style={{display:assistantVisible?undefined:'none'}}><div className="ide-ai-header"><Bot size={17}/> AI Assistant</div>
+      <div className="ide-ai-content"><AIChat terminalContext={terminalContext} terminalSessions={terminalSessions.sessions} onAttachTerminal={attachTerminal} onRemoveTerminal={id=>setTerminalContext(old=>old.filter(t=>t.id!==id))} onClearTerminals={()=>setTerminalContext([])} askTerminal={askTerminal} onAskHandled={()=>setAskTerminal(0)} projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} activePaths={review?[]:visiblePaths(layout).filter(path=>tabs.some(t=>t.path===path&&!t.isNew))} dirtyPaths={tabs.filter(t=>t.dirty).map(t=>t.path)} excluded={excluded} onExclude={path=>{setExcluded(old=>[...new Set([...old,path])]);onApprove(approved.filter(p=>p!==path),null);}} onAddContext={addContext} revision={revision} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)}/></div>
     </aside>}
     {resource&&<ResourceActions target={resource} onClose={()=>setResource(null)}/>}
     <WorkspaceStatusBar key={project.id} project={project} revision={revision} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)}/>

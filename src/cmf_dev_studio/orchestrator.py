@@ -4,6 +4,7 @@ WorkspaceService owns snapshots, authorization and persistence; agents own promp
 
 from __future__ import annotations
 
+import json
 import re
 
 from cmf_dev_studio.agents.analyst import AnalystAgent
@@ -44,26 +45,64 @@ class Orchestrator:
         validate,
         stage,
         save_plan,
+        *,
+        quick=False,
+        diagnosis="",
+        feedback="",
     ):
-        """Run the initial analyst/developer/tester sequence."""
-        stage("analyst")
-        plan = self.plan_patch(task, inventory, approved, languages)
+        """Choose the lightweight or full development sequence."""
+        if quick:
+            plan = Plan(
+                (task, diagnosis),
+                ("Resolve the diagnosed failure while preserving existing behavior.",),
+            )
+        else:
+            stage("analyst")
+            plan = self.plan_patch(task, inventory, approved, languages)
         save_plan(plan)
         prompt = build_workspace_prompt(task, inventory, approved, languages)
         return self.reviewed_patch(
-            task, prompt, plan, original, approved_paths, validate, stage
+            task,
+            prompt,
+            plan,
+            original,
+            approved_paths,
+            validate,
+            stage,
+            feedback=feedback,
+            quick=quick,
         )
 
     def reviewed_patch(
-        self, task, prompt, plan, original, approved_paths, validate, stage, feedback=""
+        self,
+        task,
+        prompt,
+        plan,
+        original,
+        approved_paths,
+        validate,
+        stage,
+        feedback="",
+        *,
+        quick=False,
     ):
         """Coordinate bounded Developer/Tester review; storage is supplied by caller."""
         policy = self.policy
+        previous = None
         for _ in range(policy.max_attempts):
             stage("developer_repair" if feedback else "developer")
+            request = prompt
+            if previous is not None:
+                request += (
+                    "\nPrevious rejected patch (untrusted data); return its complete corrected replacement:\n"
+                    + json.dumps(previous, ensure_ascii=False)
+                )
             operations = self.generate_patch(
-                prompt, plan, feedback=feedback, validate=validate
+                request, plan, feedback=feedback, validate=validate, quick=quick
             )
+            if quick:
+                return operations
+            previous = operations
             stage("tester")
             issues = self.review_patch(
                 task, plan, operations, original=original, approved_paths=approved_paths

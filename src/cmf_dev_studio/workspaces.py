@@ -17,6 +17,7 @@ from threading import Thread
 from uuid import uuid4
 
 from cmf_dev_studio.agents.developer import build_workspace_prompt
+from cmf_dev_studio.agents.investigator import Investigator
 from cmf_dev_studio.contracts import Plan
 from cmf_dev_studio.orchestrator import Orchestrator
 from cmf_dev_studio.project_runners import (
@@ -34,6 +35,10 @@ from cmf_dev_studio.projects.python_environment import (
     preparation_needed,
     prepare_environment,
 )
+from cmf_dev_studio.terminal_context import (
+    normalize_terminal_context,
+    with_terminal_context,
+)
 
 EXCLUDED = {
     ".git",
@@ -46,6 +51,9 @@ EXCLUDED = {
     ".pytest_cache",
     ".mypy_cache",
     ".tox",
+    "target",
+    "build",
+    "dist",
     ".env",
     ".env.local",
     ".env.production",
@@ -293,6 +301,8 @@ class WorkspaceService:
                 )
             for name, definition in [
                 ("approved_paths", "TEXT NOT NULL DEFAULT '[]'"),
+                ("assistant_language", "TEXT NOT NULL DEFAULT ''"),
+                ("terminal_context", "TEXT NOT NULL DEFAULT '[]'"),
                 ("plan", "TEXT NOT NULL DEFAULT '{}'"),
                 ("attempts", "INTEGER NOT NULL DEFAULT 0"),
                 ("tested_digest", "TEXT NOT NULL DEFAULT ''"),
@@ -438,6 +448,16 @@ class WorkspaceService:
             from cmf_dev_studio.projects.intelligence import prepare_context
 
             paths = row["approved_paths"] if context_paths is None else context_paths
+            if context_paths is None and row["assistant_language"]:
+                paths = next(
+                    (
+                        e["details"]["context_paths"]
+                        for e in reversed(row["events"])
+                        if e["kind"] in ("requested", "generation_retry_requested")
+                        and "context_paths" in e["details"]
+                    ),
+                    [],
+                )
             if len(paths) > 8 or len(set(paths)) != len(paths):
                 raise WorkspaceError("Select at most 8 unique reference files")
             context = prepare_context(project.path, paths)
@@ -496,6 +516,102 @@ class WorkspaceService:
                 daemon=True,
             ).start()
             return self.get(proposal_id)
+
+    def exploration_decision(self, proposal_id: str, allow: bool) -> dict:
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            if row["status"] != "awaiting_exploration":
+                raise WorkspaceError("Exploration is not awaiting permission")
+            if not allow:
+                with self._db() as db:
+                    self._event(db, proposal_id, "exploration_denied")
+                self._update(proposal_id, "answered")
+                return self.get(proposal_id)
+            baseline = self.baselines / proposal_id
+            original = {
+                p.relative_to(baseline).as_posix(): p.read_bytes()
+                for p in baseline.rglob("*")
+                if p.is_file() and not p.is_symlink()
+            }
+            if not baseline.is_dir():
+                raise WorkspaceError("Proposal baseline unavailable")
+            context = {
+                "files": [
+                    {"path": p, "content": original[p].decode("utf-8")}
+                    for p in row["approved_paths"]
+                ]
+            }
+            with self._db() as db:
+                self._event(db, proposal_id, "exploration_allowed")
+                db.execute(
+                    "UPDATE workspace_proposals SET status='queued' WHERE id=?",
+                    (proposal_id,),
+                )
+            Thread(
+                target=self._generate,
+                args=(proposal_id, row["task"], context, original),
+                daemon=True,
+            ).start()
+            return self.get(proposal_id)
+
+    def _investigate(self, proposal_id, client, task, context, original, row):
+        def activity(action, query):
+            with self._db() as db:
+                self._event(
+                    db, proposal_id, "exploration_tool", stage=action, query=query
+                )
+
+        history = []
+        for previous in reversed(self.list(row["project_id"])[:8]):
+            if (
+                previous["id"] == proposal_id
+                or previous["created_at"] >= row["created_at"]
+            ):
+                continue
+            messages = [
+                e["details"].get("message", "")
+                for e in previous["events"]
+                if e["kind"] == "assistant_response"
+            ]
+            history.append(
+                {
+                    "task": previous["task"][:2000],
+                    "response": "\n".join(messages)[-2000:],
+                }
+            )
+        investigator = Investigator(
+            client,
+            original,
+            {f["path"]: f["content"] for f in context["files"]},
+            any(e["kind"] == "exploration_allowed" for e in row["events"]),
+            activity,
+        )
+        action, message = investigator.run(
+            task, row["terminal_context"], row["assistant_language"], history
+        )
+        with self._db() as db:
+            self._event(
+                db, proposal_id, "assistant_response", message=message, action=action
+            )
+            if action in ("patch", "quick_patch"):
+                self._event(
+                    db,
+                    proposal_id,
+                    "investigation_completed",
+                    action=action,
+                    message=message,
+                    paths=list(investigator.approved),
+                )
+                db.execute(
+                    "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
+                    (json.dumps(list(investigator.approved)), proposal_id),
+                )
+        if action not in ("patch", "quick_patch"):
+            self._update(
+                proposal_id,
+                "awaiting_exploration" if action == "permission" else "answered",
+            )
+        return action, message, investigator.approved
 
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
@@ -556,6 +672,7 @@ class WorkspaceService:
         row = self._get(proposal_id)
         row["changes"] = json.loads(row["changes"])
         row["approved_paths"] = json.loads(row["approved_paths"])
+        row["terminal_context"] = json.loads(row["terminal_context"])
         row["plan"] = json.loads(row["plan"])
         with self._db() as db:
             events = db.execute(
@@ -584,9 +701,18 @@ class WorkspaceService:
         task: str,
         selected_paths: list[str],
         context_digest: str | None = None,
+        terminal_context: list[dict] | None = None,
+        assistant_language: str = "",
     ) -> dict:
         with _APPLY_LOCK:
-            return self._submit(project_id, task, selected_paths, context_digest)
+            return self._submit(
+                project_id,
+                task,
+                selected_paths,
+                context_digest,
+                terminal_context,
+                assistant_language,
+            )
 
     def _submit(
         self,
@@ -594,12 +720,15 @@ class WorkspaceService:
         task: str,
         selected_paths: list[str],
         context_digest: str | None = None,
+        terminal_context: list[dict] | None = None,
+        assistant_language: str = "",
     ) -> dict:
+        terminal_context = normalize_terminal_context(terminal_context)
         project = self.manager.get(project_id)
         if project is None:
             raise KeyError("Project not found")
-        if not task.strip() or len(task) > 4000:
-            raise WorkspaceError("Task must be between 1 and 4000 characters")
+        if not task.strip() or len(task) > 24000:
+            raise WorkspaceError("Task must be between 1 and 24000 characters")
         if len(selected_paths) > 8 or len(set(selected_paths)) != len(selected_paths):
             raise WorkspaceError("Select at most 8 unique reference files")
         from cmf_dev_studio.projects.intelligence import prepare_context
@@ -632,7 +761,7 @@ class WorkspaceService:
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as db:
             db.execute(
-                "INSERT INTO workspace_proposals(id,project_id,status,task,created_at,approved_paths) VALUES (?,?,?,?,?,?)",
+                "INSERT INTO workspace_proposals(id,project_id,status,task,created_at,approved_paths,terminal_context) VALUES (?,?,?,?,?,?,?)",
                 (
                     proposal_id,
                     project_id,
@@ -640,7 +769,12 @@ class WorkspaceService:
                     task,
                     now,
                     json.dumps(selected_paths),
+                    json.dumps(terminal_context),
                 ),
+            )
+            db.execute(
+                "UPDATE workspace_proposals SET assistant_language=? WHERE id=?",
+                (assistant_language, proposal_id),
             )
             self._event(db, proposal_id, "requested", context_paths=selected_paths)
         Thread(
@@ -813,6 +947,7 @@ class WorkspaceService:
                 for p in sorted(paths)
                 if p in original
             )
+            approved = with_terminal_context(approved, row["terminal_context"])
             prompt = build_workspace_prompt(
                 task,
                 "\n".join(sorted(original))[:12000],
@@ -845,6 +980,14 @@ class WorkspaceService:
                 lambda ops: validate_operations(ops, original, paths),
                 lambda stage: self._stage(proposal_id, stage),
                 feedback=row["test_output"],
+                quick=next(
+                    (
+                        e["details"].get("action") == "quick_patch"
+                        for e in reversed(row["events"])
+                        if e["kind"] == "investigation_completed"
+                    ),
+                    False,
+                ),
             )
             validate_operations(operations, original, paths)
             staging.mkdir()
@@ -906,11 +1049,58 @@ class WorkspaceService:
                 f"FILE: {f['path']}\n{f['content']}" for f in context["files"]
             )
             approved_paths = {f["path"] for f in context["files"]}
+            approved = with_terminal_context(
+                approved, self.get(proposal_id)["terminal_context"]
+            )
             project = self.manager.get(self.get(proposal_id)["project_id"])
             if project is None:
                 raise WorkspaceError("Project not found")
             task = project_task(task, project.language)
             languages = detect_languages(original)
+            row = self.get(proposal_id)
+            options = {}
+            if row["assistant_language"]:
+                completed = None
+                for event in reversed(row["events"]):
+                    if event["kind"] == "generation_retry_requested" and event[
+                        "details"
+                    ].get("context_changed"):
+                        break
+                    if event["kind"] == "investigation_completed":
+                        completed = event["details"]
+                        break
+                if completed:
+                    action, message = completed["action"], completed["message"]
+                    discovered = {
+                        p: original[p].decode("utf-8") for p in completed["paths"]
+                    }
+                    with self._db() as db:
+                        db.execute(
+                            "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
+                            (json.dumps(list(discovered)), proposal_id),
+                        )
+                    options["feedback"] = next(
+                        (
+                            e["details"].get("error", "")
+                            for e in reversed(row["events"])
+                            if e["kind"] == "generation_failed"
+                        ),
+                        "",
+                    )
+                else:
+                    action, message, discovered = self._investigate(
+                        proposal_id, client, task, context, original, row
+                    )
+                if action not in ("patch", "quick_patch"):
+                    return
+                approved_paths = set(discovered)
+                approved = with_terminal_context(
+                    "\n\n".join(f"FILE: {p}\n{v}" for p, v in discovered.items()),
+                    row["terminal_context"],
+                )
+                task += "\nInvestigation findings (verify against source): " + message
+                if action == "quick_patch":
+                    options.update(quick=True, diagnosis=message)
             operations = engine.prepare(
                 task,
                 inventory,
@@ -921,6 +1111,7 @@ class WorkspaceService:
                 lambda ops: validate_operations(ops, original, approved_paths),
                 lambda stage: self._stage(proposal_id, stage),
                 lambda plan: self._stage(proposal_id, "developer", plan=plan),
+                **options,
             )
             changes = self._write_operations(proposal_id, operations, original)
             self._update(proposal_id, "ready", changes=changes)

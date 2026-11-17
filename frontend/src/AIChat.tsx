@@ -1,31 +1,33 @@
+import { terminalTask, type TerminalContext } from './terminalContext';
+import type { TerminalSession } from './terminalSessions';
 import { contextFiles, toggleRetryFile, sameContext } from './chatContext';
 import { useEffect, useRef, useState } from 'react';
-import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X } from 'lucide-react';
-import { prepareProposalPython, decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
+import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X, Terminal } from 'lucide-react';
+import { decideExploration, prepareProposalPython, decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
 
-type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePaths: string[]; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
+type Props = { terminalContext:TerminalContext[]; terminalSessions:TerminalSession[]; onAttachTerminal:(id:number)=>void; onRemoveTerminal:(id:number)=>void; onClearTerminals:()=>void; askTerminal:number; onAskHandled:()=>void; projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePaths: string[]; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
 const infrastructureFailure = (item:Proposal) => /infrastructure_error|^Runner infrastructure error:/.test((item.test_output??'').split('\n')[0]);
 const canRunTests = (item:Proposal) => item.status==='ready'||(item.status==='test_failed'&&infrastructureFailure(item));
 const repairCount = (item:Proposal) => item.events?.filter(e=>e.kind==='repair_requested').length??0;
 const activeStatuses = ['queued','running'];
-const describe = (status: Proposal['status']) => ({queued:'Waiting for the AI…',running:'Preparing changes…',ready:'Changes ready · Approval required',tested:'Tests passed · Ready to review',test_failed:'Tests failed · Review the output',applied:'Changes applied',failed:'Could not prepare changes'})[status];
+const describe = (status: Proposal['status']) => ({awaiting_exploration:'Waiting for permission',answered:'Answered',queued:'Waiting for the AI…',running:'Preparing changes…',ready:'Changes ready · Approval required',tested:'Tests passed · Ready to review',test_failed:'Tests failed · Review the output',applied:'Changes applied',failed:'Could not prepare changes'})[status];
 
 const needsContext = (error?: string | null) => /Permission required to read and modify|already exists: use modify|Review and approve repository context/i.test(error ?? '');
 
 
 const transient = (error?:string) => /\b503\b|UNAVAILABLE|high demand/i.test(error ?? '');
 const commandText = (args:string[]) => args.map(arg=>/^[\w./:=+-]+$/.test(arg)?arg:JSON.stringify(arg)).join(' ');
-const translator = (task:string) => {
-  const es = /\b(crea(?:me)?|haz|anade|quiero|puedes|calculadora|modifica|corrige|implementa|por favor|necesito|genera|agrega|elimina|cambia|actualiza|pruebas|ficheros)\b/i.test(task.normalize('NFD').replace(/\p{M}/gu,''));
-  return (en:string,spanish:string) => es?spanish:en;
+const translator = (task:string, language?:string) => {
+  const es = /\b(crea(?:me)?|haz|anade|quiero|puedes|calculadora|modifica|corrige|implementa|por favor|necesito|genera|agrega|elimina|cambia|actualiza|pruebas|ficheros|analiza|arregla)\b/i.test(task.normalize('NFD').replace(/\p{M}/gu,''));
+  return (en:string,spanish:string) => (language ? language==='Spanish' : es)?spanish:en;
 };
 function HistoryContext({paths}:{paths?:string[]}) {
   return paths?.length ? <div className="chat-context-tags" style={{marginTop:6,marginBottom:0}}>{paths.map(path=><span className="chat-context-tag" key={path} title={path}><FileCode2 size={13}/><span>{path.split('/').pop()}</span></span>)}</div> : null;
 }
 function Conversation({item,projectName,onReview}:{item:Proposal;projectName:string;onReview:Props['onReview']}) {
   // Use persisted facts, not additional model calls or invented explanations.
-  const t = translator(item.task);
-  const events = (item.events ?? []).filter(e=>!['requested','agent_stage'].includes(e.kind));
+  const t = translator(item.task,item.assistant_language);
+  const events = (item.events ?? []).filter(e=>!['requested','agent_stage','exploration_tool'].includes(e.kind));
   const generated = events.filter(e=>['files_generated','repair_ready'].includes(e.kind));
   const lastGenerated = generated[generated.length-1]?.sequence;
   const assistant = (children:React.ReactNode) => <div className="chat-dialog-assistant"><div className="chat-dialog-author"><Bot size={14}/> {t('Assistant','Asistente')}</div>{children}</div>;
@@ -35,6 +37,9 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
   return <div className="chat-dialog">
     {events.map(event=>{const d=event.details;let content:React.ReactNode;
       switch(event.kind){
+        case 'assistant_response': content=assistant(<p style={{whiteSpace:'pre-wrap'}}>{d.message || t('I need permission to explore the project.','Necesito permiso para explorar el proyecto.')}</p>);break;
+        case 'exploration_allowed': content=user(t('Allow exploration','Permitir exploración'));break;
+        case 'exploration_denied': content=user(t('Deny exploration','Denegar exploración'));break;
         case 'files_generated': case 'repair_ready': content=assistant(<><p>{event.kind==='repair_ready'?t('I have prepared a revised proposal.','He preparado una propuesta corregida.'):t(`I have prepared ${d.count ?? item.changes.length} files for your request.`,`He preparado ${d.count ?? item.changes.length} ficheros para tu petición.`)}</p>{event.sequence===lastGenerated&&files}</>);break;
         case 'command_approved': content=<>{assistant(<><p>{t('May I run this command to check the changes?','¿Puedo ejecutar este comando para comprobar los cambios?')}</p>{d.command&&<pre className="chat-history-command">{commandText(d.command)}</pre>}</>)}{user(t('Allow once','Permitir una vez'))}</>;break;
         case 'tests_skipped': content=d.repair_cancelled?<>{user(t('Cancel','Cancelar'))}{assistant(<p>{t('I will leave the failed proposal unchanged.','Dejo la propuesta fallida sin aplicar.')}</p>)}</>:<>{assistant(<p>{t('May I run the tests?','¿Puedo ejecutar los tests?')}</p>)}{user(t('Skip','Omitir'))}{assistant(<p>{t('I will leave the proposal pending.','Dejo la propuesta pendiente.')}</p>)}</>;break;
@@ -59,13 +64,15 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
     {!generated.length&&item.changes.length>0&&assistant(files)}
     {!events.some(e=>e.kind==='tests_passed'||e.kind==='tests_failed')&&item.test_output&&assistant(<><p>{item.status==='test_failed'?t('The tests failed.','Los tests han fallado.'):t('Test result','Resultado de los tests')}</p>{output(item.test_output)}</>)}
     {item.status==='applied'&&!events.some(e=>e.kind==='changes_applied')&&assistant(<p>{t('The changes are saved.','Los cambios están guardados.')}</p>)}
-    {!!item.events?.some(e=>e.kind==='agent_stage')&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>e.kind==='agent_stage').map(e=><div key={e.sequence}>{e.details.stage} · {new Date(e.created_at).toLocaleTimeString()}</div>)}</details>}
+    {!!item.events?.some(e=>['agent_stage','exploration_tool'].includes(e.kind))&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>['agent_stage','exploration_tool'].includes(e.kind)).map(e=><div key={e.sequence}>{e.details.stage} {e.details.query} · {new Date(e.created_at).toLocaleTimeString()}</div>)}</details>}
   </div>;
 }
 
+const retryPaths = (item:Proposal) => item.assistant_language ? ([...(item.events??[])].reverse().find(e=>['requested','generation_retry_requested'].includes(e.kind)&&e.details.context_paths)?.details.context_paths??[]) : (item.approved_paths??[]);
+
 function RetryContext({item,candidates,ready,disabled,dirtyPaths,onDecision}:{item:Proposal;candidates:RepositoryInsights['candidates'];ready:boolean;disabled:boolean;dirtyPaths:string[];onDecision:(retry:boolean,paths:string[])=>Promise<void>}) {
-  const t=translator(item.task);
-  const [selected,setSelected]=useState<string[]>(()=>[...(item.approved_paths??[])]);
+  const t=translator(item.task,item.assistant_language);
+  const [selected,setSelected]=useState<string[]>(()=>[...retryPaths(item)]);
   const [open,setOpen]=useState(false);
   const [query,setQuery]=useState('');
   const unavailable=selected.some(path=>!candidates.some(c=>c.path===path));
@@ -73,7 +80,7 @@ function RetryContext({item,candidates,ready,disabled,dirtyPaths,onDecision}:{it
   const matches=candidates.filter(c=>c.path.toLowerCase().includes(query.toLowerCase())).slice(0,30);
   const toggle=(path:string)=>setSelected(old=>toggleRetryFile(old,path));
   return <div className="chat-retry-context">
-    <small>{t('Retry context','Contexto del reintento')}</small>
+    <small>{t('Retry context','Contexto del reintento')}</small>{item.terminal_context?.map(t=><details key={t.id} className="chat-history-detail"><summary>{t.name} · Original terminal snapshot</summary><pre className="chat-test-output">{t.output}</pre></details>)}
     <div className="chat-context-tags">{selected.map(path=><span className="chat-context-tag" key={path} title={path}><FileCode2 size={13}/><span>{path.split('/').pop()}</span><button type="button" disabled={disabled} aria-label={`Remove ${path} from retry context`} onClick={()=>toggle(path)}><X size={12}/></button></span>)}</div>
     <button type="button" className="chat-link" disabled={disabled||!ready} onClick={()=>{setOpen(v=>!v);setQuery('');}}><Paperclip size={14}/> {t('Add context','Añadir contexto')}</button>
     {open&&<div className="chat-context-picker"><input autoFocus aria-label="Search retry files" placeholder={t('Search project files…','Buscar ficheros…')} value={query} onChange={e=>setQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Escape')setOpen(false);if(e.key==='Enter'&&matches[0]){e.preventDefault();toggle(matches[0].path);}}}/><div className="chat-context-results">{matches.map(c=><button type="button" key={c.path} disabled={disabled||(!selected.includes(c.path)&&selected.length>=8)} onClick={()=>toggle(c.path)} title={c.path}><FileCode2 size={14}/><span>{c.path}</span>{selected.includes(c.path)&&<Check size={13}/>}</button>)}</div></div>}
@@ -83,9 +90,10 @@ function RetryContext({item,candidates,ready,disabled,dirtyPaths,onDecision}:{it
   </div>;
 }
 
-export default function AIChat({projectId,projectName,projectKind,contextPaths,activePaths,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied}:Props) {
+export default function AIChat({projectId,projectName,projectKind,contextPaths,activePaths,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied,terminalContext,terminalSessions,onAttachTerminal,onRemoveTerminal,onClearTerminals,askTerminal,onAskHandled}:Props) {
   const [items,setItems] = useState<Proposal[]>([]);
   const [draft,setDraft] = useState('');
+  useEffect(()=>{if(askTerminal){setDraft(old=>old||terminalTask(items[items.length-1]?.task??'',navigator.language));onAskHandled();}},[askTerminal]);
   const [busy,setBusy] = useState(false);
   const [workingId,setWorkingId] = useState<string|null>(null);
   const [error,setError] = useState('');
@@ -127,9 +135,9 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
   },[items]);
   async function submit(e:React.FormEvent){
     e.preventDefault();const task=draft.trim();if(!task||busy||workingId!==null||!inventoryReady)return;
-    if(dirtyPaths.some(path=>paths.includes(path))){setError('Save modified context files before sending, or remove their tags.');return;}
+    if(dirtyPaths.length){setError('Save modified files before sending so the assistant can inspect the current project.');return;}
     setBusy(true);setError('');
-    try{const preview=paths.length?await previewRepositoryContext(projectId,paths):null;const proposal=await createProposal(projectId,task,paths,preview?.digest??null);setItems(old=>[...old,proposal]);setDraft('');setSelectedApproval(null);window.setTimeout(()=>bottom.current?.scrollIntoView({behavior:'smooth',block:'end'}),50);}
+    try{const preview=paths.length?await previewRepositoryContext(projectId,paths):null;const proposal=await createProposal(projectId,task,paths,preview?.digest??null,terminalContext,translator(task)(items.slice().reverse().find(item=>item.assistant_language)?.assistant_language || (navigator.language.startsWith('es')?'Spanish':'English'),'Spanish'));onClearTerminals();setItems(old=>[...old,proposal]);setDraft('');setSelectedApproval(null);window.setTimeout(()=>bottom.current?.scrollIntoView({behavior:'smooth',block:'end'}),50);}
     catch(e){const message=e instanceof Error?e.message:String(e);setError(message);if(needsContext(message))await openContext();}finally{setBusy(false);}
   }
   const latest = items[items.length-1];
@@ -143,12 +151,19 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
     return()=>{cancelled=true;};
   },[projectId,previewId,approvalItem?.attempts,approvalItem?.status]);
   async function generationDecision(item:Proposal,retry:boolean, selected:string[]){
-    const useCurrent=retry&&!sameContext(selected,item.approved_paths??[]);
+    const useCurrent=retry&&!sameContext(selected,retryPaths(item));
     if(workingId!==null||busy)return;
     if(retry&&dirtyPaths.some(path=>selected.includes(path))){setError('Save modified context files before retrying.');return;}
     setWorkingId(item.id);setError('');
     try{const preview=useCurrent&&selected.length?await previewRepositoryContext(projectId,selected):null;const result=await decideGeneration(item.id,retry,useCurrent?selected:undefined,preview?.digest);setItems(old=>old.map(p=>p.id===item.id?result:p));if(retry)setSelectedApproval(item.id);}
     catch(e){setError(e instanceof Error?e.message:String(e));}finally{setWorkingId(null);}
+  }
+  async function explore(item:Proposal, allow:boolean){
+    if(workingId!==null||busy)return;
+    if(allow&&dirtyPaths.length){setError('Save modified files before authorizing exploration.');return;}
+    setWorkingId(item.id);setError('');
+    try{const result=await decideExploration(item.id,allow);setItems(old=>old.map(p=>p.id===item.id?result:p));}
+    catch(e){setError(String(e));}finally{setWorkingId(null);}
   }
   async function approveTests(id:string){if(testApproval?.id!==id||workingId!==null)return;const {preview}=testApproval;setTestApproval(null);setWorkingId(id);setError('');try{const result=await testProposal(id,preview.approval);setItems(old=>old.map(p=>p.id===id?result:p));}catch(e){setError(String(e));setSkipped(old=>[...old,id]);}finally{setWorkingId(null);}}
   async function repair(id:string){
@@ -174,11 +189,12 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
   return <div className="chat-shell">
     <div className="chat-topline"><span><Bot size={15}/> Your coding assistant</span></div>
     <div className="chat-scroll">
-      {!items.length&&<div className="chat-empty"><Bot size={28}/><h3>What shall we build?</h3><p>Describe a change to your project. I'll prepare the files and ask before running local tests. Nothing is applied without your approval.</p></div>}
-      {items.map(item=>{const t=translator(item.task);const setupEvent=item.events?.filter(e=>e.kind.startsWith("environment_")).slice(-1)[0];const setup=setupEvent?.kind;const jvm=setupEvent?.details.environment==='jvm';return <div className="chat-exchange" key={item.id}>
-        <div className="chat-user-bubble">{item.task}<HistoryContext paths={item.events?.find(e=>e.kind==='requested')?.details.context_paths ?? item.approved_paths}/></div>
+      {!items.length&&<div className="chat-empty"><Bot size={28}/><h3>What shall we build?</h3><p>Ask a question, paste an error, or request a change. I can investigate your project with permission. Nothing is applied without your approval.</p></div>}
+      {items.map(item=>{const t=translator(item.task,item.assistant_language);const setupEvent=item.events?.filter(e=>e.kind.startsWith("environment_")).slice(-1)[0];const setup=setupEvent?.kind;const jvm=setupEvent?.details.environment==='jvm';return <div className="chat-exchange" key={item.id}>
+        <div className="chat-user-bubble">{item.task}<HistoryContext paths={item.events?.find(e=>e.kind==='requested')?.details.context_paths ?? item.approved_paths}/>{item.terminal_context?.map(t=><details key={t.id} className="chat-history-detail"><summary><Terminal size={13}/> {t.name}</summary><pre className="chat-test-output">{t.output}</pre></details>)}</div>
         <div className="chat-assistant-message">
           <Conversation item={item} projectName={projectName} onReview={onReview}/>
+          {item.status==='awaiting_exploration'&&<div className="chat-change-card"><p>{t('Allow read-only project exploration? Relevant source may be sent to the AI provider. No commands or edits are authorized.','¿Permites explorar el proyecto en modo lectura? El código relevante podrá enviarse al proveedor de IA. No se autorizan comandos ni modificaciones.')}</p><div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null||busy} onClick={()=>void explore(item,false)}>{t('Deny','Denegar')}</button><button className="chat-inline-primary" disabled={workingId!==null||busy} onClick={()=>void explore(item,true)}>{t('Allow once','Permitir una vez')}</button></div></div>}
           {item.status==='applied'&&['environment_offered','environment_failed'].includes(setup??'')&&workingId!==item.id&&<div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null||busy} onClick={()=>void preparePython(item.id,false)}>{t('Not now','Ahora no')}</button><button className="chat-inline-primary" disabled={workingId!==null||busy} onClick={()=>void preparePython(item.id,true)}>{setup==='environment_failed'?t('Retry','Reintentar'):jvm?t('Prepare project','Preparar proyecto'):t('Prepare environment','Preparar entorno')}</button></div>}
           {activeStatuses.includes(item.status)&&<div className="chat-inline-status"><LoaderCircle className="chat-spin" size={14}/> {t(describe(item.status),item.status==='queued'?'Esperando a la IA…':'Preparando cambios…')}</div>}
           {item.status==='failed'&&!item.events?.some(e=>e.kind==='generation_cancelled')&&<RetryContext key={`${item.id}:${item.events?.slice(-1)[0]?.sequence??0}`} item={item} candidates={candidates} ready={inventoryReady} disabled={workingId!==null||busy} dirtyPaths={dirtyPaths} onDecision={(retry,selected)=>generationDecision(item,retry,selected)}/>}
@@ -205,8 +221,9 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
     {error&&<div className="chat-error chat-global-error" role="alert"><CircleAlert size={14}/>{error}<button onClick={()=>setError('')}><X size={13}/></button></div>}
     <form className="chat-composer" onSubmit={e=>void submit(e)}>
       {paths.length>0&&<div className="chat-context-tags">{paths.map(path=><span key={path} className={`chat-context-tag ${eligibleActive.includes(path)&&!manual.includes(path)?'automatic':''}`} title={path}><FileCode2 size={13}/><span>{path.split('/').pop()}</span><button type="button" aria-label={`Remove ${path} from context`} disabled={busy} onClick={()=>onExclude(path)}><X size={12}/></button></span>)}</div>}
-      {pickerOpen&&<div className="chat-context-picker"><input aria-label="Search project files" placeholder="Search project files…" value={search} onChange={e=>{if(mention)setDraft(old=>old.slice(0,old.length-mention[1].length)+e.target.value);else setQuery(e.target.value);}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(matches[0])choose(matches[0].path);}if(e.key==='Escape'){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}}}/><div className="chat-context-results">{matches.map(c=><button type="button" key={c.path} disabled={busy||(!manual.includes(c.path)&&manual.length>=8)} onClick={()=>choose(c.path)} title={c.path}><FileCode2 size={14}/><span>{c.path}</span>{paths.includes(c.path)&&<Check size={13}/>}</button>)}{!matches.length&&<small>No eligible files found</small>}</div></div>}
-      <textarea aria-label="Ask AI" placeholder="Ask AI to change your project…" rows={3} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'&&pickerOpen){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(mention&&matches[0])choose(matches[0].path);else void submit(e);}}}/>
+      {terminalContext.map(t=><div key={t.id} className="chat-terminal-attachment"><details><summary><Terminal size={13}/> {t.name} · Preview output</summary><pre className="chat-test-output">{t.output}</pre></details><button type="button" disabled={busy} aria-label={`Remove ${t.name}`} onClick={()=>onRemoveTerminal(t.id)}><X size={12}/></button></div>)}
+      {pickerOpen&&<div className="chat-context-picker"><input aria-label="Search project files" placeholder="Search project files…" value={search} onChange={e=>{if(mention)setDraft(old=>old.slice(0,old.length-mention[1].length)+e.target.value);else setQuery(e.target.value);}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(matches[0])choose(matches[0].path);}if(e.key==='Escape'){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}}}/><div className="chat-context-results">{!mention&&terminalSessions.filter(t=>t.name.toLowerCase().includes(search.toLowerCase())).map(t=><button type="button" key={`terminal-${t.id}`} disabled={busy} onClick={()=>{onAttachTerminal(t.id);setContextOpen(false);}}><Terminal size={14}/><span>{t.name}</span>{terminalContext.some(c=>c.id===t.id)&&<Check size={13}/>}</button>)}{matches.map(c=><button type="button" key={c.path} disabled={busy||(!manual.includes(c.path)&&manual.length>=8)} onClick={()=>choose(c.path)} title={c.path}><FileCode2 size={14}/><span>{c.path}</span>{paths.includes(c.path)&&<Check size={13}/>}</button>)}{!matches.length&&<small>No eligible files found</small>}</div></div>}
+      <textarea aria-label="Ask AI" placeholder="Ask AI about your project…" rows={3} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'&&pickerOpen){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(mention&&matches[0])choose(matches[0].path);else void submit(e);}}}/>
       <div className="chat-composer-bottom"><div className="chat-context-tools"><button type="button" className="chat-add-context" disabled={busy} onClick={()=>{setQuery('');setContextOpen(v=>!v);}}><Paperclip size={14}/> Add context</button></div><button type="submit" aria-label="Send to AI" disabled={!draft.trim()||busy||workingId!==null||!inventoryReady}>{busy?<LoaderCircle className="chat-spin" size={16}/>:<Send size={16}/>}</button></div>
     </form>
   </div>;

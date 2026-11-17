@@ -24,8 +24,14 @@ class DeveloperAgent:
         *,
         feedback: str = "",
         max_attempts: int = 3,
+        quick: bool = False,
         validate: Callable[[object], None],
     ) -> list[dict]:
+        test_instruction = (
+            "\nFor this localized correction, preserve existing tests. Add a regression test only if needed and exercise the actual production entry point. Do not invent behavior or unrelated tests. "
+            if quick
+            else "\nGenerate concrete runnable tests when the requested change is testable. "
+        )
         instructions = (
             "\nROLE: DEVELOPER. Implement these ANALYST requirements:\n"
             + "\n".join("- " + r for r in plan.requirements)
@@ -34,8 +40,8 @@ class DeveloperAgent:
                 "\n".join("- " + r for r in plan.acceptance)
                 or "(no additional criteria)"
             )
-            + "\nGenerate concrete runnable tests when the requested change is testable. "
-            "Implement the original task as well as the plan. Never remove required behavior, replace integrations with placeholders, swallow missing dependencies, or weaken valid tests to pass a repair. Declare required dependencies using project conventions. "
+            + test_instruction
+            + "Implement the original task as well as the plan. Never remove required behavior, replace integrations with placeholders, swallow missing dependencies, or weaken valid tests to pass a repair. Declare required dependencies using project conventions. "
             "Do not generate self-referential or tautological assertions. Preserve conventional indentation, blank lines and real line breaks in every source and build file. Encode line breaks as JSON newline escapes, never flatten or minify code. Check imports and syntax; Java static imports must begin with import static. For new Maven projects specify compatible Java release and explicit compiler and test plugin versions. Preserve existing build conventions.\n"
         )
         instructions += "\nTEST QUALITY: " + test_quality_guidance() + "\n"
