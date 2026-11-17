@@ -1,7 +1,7 @@
 import { contextFiles, toggleRetryFile, sameContext } from './chatContext';
 import { useEffect, useRef, useState } from 'react';
 import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X } from 'lucide-react';
-import { decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
+import { prepareProposalPython, decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
 
 type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePath: string|null; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
 const infrastructureFailure = (item:Proposal) => /infrastructure_error|^Runner infrastructure error:/.test((item.test_output??'').split('\n')[0]);
@@ -43,6 +43,11 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
         case 'repair_requested': content=<>{assistant(<p>{t('The tests failed. Shall I correct the proposal before testing again?','Los tests han fallado. ¿Quieres que corrija la propuesta antes de volver a probarla?')}</p>)}{user(t('Fix and retry','Corregir y reintentar'))}</>;break;
         case 'apply_deferred': content=<>{assistant(<p>{t(`May I apply the changes to ${projectName}?`,`¿Aplico los cambios a ${projectName}?`)}</p>)}{user(t('Not now','Ahora no'))}</>;break;
         case 'changes_applied': content=<>{assistant(<p>{t(`May I apply the changes to ${projectName}?`,`¿Aplico los cambios a ${projectName}?`)}</p>)}{user(t('Accept changes','Aceptar cambios'))}{assistant(<p>{t(`I have saved ${d.count ?? item.changes.length} files to your project.`,`He guardado ${d.count ?? item.changes.length} ficheros en tu proyecto.`)}</p>)}</>;break;
+        case 'environment_offered': content=assistant(<p>{t('Shall I prepare the Python environment so you can run your program? This may install dependencies from the Internet.','¿Quieres que prepare el entorno Python para ejecutar el programa? Puede ser necesario descargar e instalar dependencias.')}</p>);break;
+        case 'environment_approved': content=user(t('Prepare environment','Preparar entorno'));break;
+        case 'environment_skipped': content=user(t('Not now','Ahora no'));break;
+        case 'environment_ready': content=assistant(<p>{t('Your Python environment is ready. Restart the terminal if it is already open.','El entorno Python está listo. Si tienes el terminal abierto, reinícialo.')}</p>);break;
+        case 'environment_failed': content=assistant(<><p>{t('I could not prepare the environment. Your files are saved.','No he podido preparar el entorno. Tus ficheros están guardados.')}</p>{output(d.error)}</>);break;
         case 'layout_changed': content=assistant(<p>{t('The project layout changed. Please submit a new request.','La estructura del proyecto ha cambiado. Envía una nueva petición.')}</p>);break;
         case 'generation_failed': case 'repair_failed': content=assistant(<><p>{transient(d.error)?t('The AI model is temporarily overloaded. I could not prepare the changes.','El modelo de IA está temporalmente saturado. No he podido preparar los cambios.'):needsContext(d.error)?t('I need the existing files in context before modifying them.','Necesito que añadas los ficheros existentes al contexto para poder modificarlos.'):t('I could not prepare the changes.','No he podido preparar los cambios.')}</p>{output(d.error)}{event.kind==='generation_failed'&&<p>{t('Would you like me to retry the same request?','¿Quieres que vuelva a intentar la misma petición?')}</p>}</>);break;
         case 'generation_retry_requested': content=user(t('Retry','Reintentar'),d.context_paths ?? item.events?.find(e=>e.kind==='requested')?.details.context_paths ?? item.approved_paths);break;
@@ -160,18 +165,25 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
     } catch(e){setError(String(e));}finally{setWorkingId(null);}
   }
   async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id,projectKind==='existing');setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
+  async function preparePython(id:string, confirmed:boolean){
+    if(workingId!==null)return;
+    setWorkingId(id);setError('');
+    try{const result=await prepareProposalPython(id,confirmed);setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}
+    catch(e){setError(String(e));}finally{setWorkingId(null);}
+  }
   return <div className="chat-shell">
     <div className="chat-topline"><span><Bot size={15}/> Your coding assistant</span></div>
     <div className="chat-scroll">
       {!items.length&&<div className="chat-empty"><Bot size={28}/><h3>What shall we build?</h3><p>Describe a change to your project. I'll prepare the files and ask before running local tests. Nothing is applied without your approval.</p></div>}
-      {items.map(item=>{const t=translator(item.task);return <div className="chat-exchange" key={item.id}>
+      {items.map(item=>{const t=translator(item.task);const setup=item.events?.filter(e=>e.kind.startsWith("environment_")).slice(-1)[0]?.kind;return <div className="chat-exchange" key={item.id}>
         <div className="chat-user-bubble">{item.task}<HistoryContext paths={item.events?.find(e=>e.kind==='requested')?.details.context_paths ?? item.approved_paths}/></div>
         <div className="chat-assistant-message">
           <Conversation item={item} projectName={projectName} onReview={onReview}/>
+          {item.status==='applied'&&['environment_offered','environment_failed'].includes(setup??'')&&workingId!==item.id&&<div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null||busy} onClick={()=>void preparePython(item.id,false)}>{t('Not now','Ahora no')}</button><button className="chat-inline-primary" disabled={workingId!==null||busy} onClick={()=>void preparePython(item.id,true)}>{setup==='environment_failed'?t('Retry','Reintentar'):t('Prepare environment','Preparar entorno')}</button></div>}
           {activeStatuses.includes(item.status)&&<div className="chat-inline-status"><LoaderCircle className="chat-spin" size={14}/> {t(describe(item.status),item.status==='queued'?'Esperando a la IA…':'Preparando cambios…')}</div>}
           {item.status==='failed'&&!item.events?.some(e=>e.kind==='generation_cancelled')&&<RetryContext key={`${item.id}:${item.events?.slice(-1)[0]?.sequence??0}`} item={item} candidates={candidates} ready={inventoryReady} disabled={workingId!==null||busy} dirtyPaths={dirtyPaths} onDecision={(retry,selected)=>generationDecision(item,retry,selected)}/>}
 
-          {workingId===item.id&&item.status!=='failed'&&<div className="chat-inline-status" role="status"><LoaderCircle className="chat-spin" size={14}/> {item.status==='tested'?t('Applying changes…','Aplicando cambios…'):t('Running approved local tests…','Ejecutando tests locales autorizados…')}</div>}
+          {workingId===item.id&&item.status!=='failed'&&<div className="chat-inline-status" role="status"><LoaderCircle className="chat-spin" size={14}/> {item.status==='applied'?t('Preparing Python environment…','Preparando entorno Python…'):item.status==='tested'?t('Applying changes…','Aplicando cambios…'):t('Running approved local tests…','Ejecutando tests locales autorizados…')}</div>}
           {item.id!==approvalItem?.id&&['ready','test_failed'].includes(item.status)&&<button className="chat-link" disabled={workingId!==null} onClick={()=>setSelectedApproval(item.id)}>{t('Review command','Revisar comando')}</button>}
           {item.id===approvalItem?.id&&['ready','test_failed'].includes(item.status)&&workingId!==item.id&&(!skipped.includes(item.id)?<>
             {item.status==='test_failed'&&!infrastructureFailure(item)?<>

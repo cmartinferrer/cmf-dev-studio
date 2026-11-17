@@ -587,6 +587,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (WorkspaceError, OSError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    class PreparePythonRequest(BaseModel):
+        confirmed: StrictBool
+
+    @app.post("/api/proposals/{proposal_id}/prepare-python")
+    def prepare_python(proposal_id: str, request: PreparePythonRequest) -> dict:
+        try:
+            return workspaces.prepare_python(proposal_id, request.confirmed)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     return app
 
 

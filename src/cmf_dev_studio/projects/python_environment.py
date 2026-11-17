@@ -114,3 +114,84 @@ def create_environment(project: Project) -> None:
         raise ValueError(
             result.stderr.strip()[-2000:] or "uv could not create the environment"
         )
+
+
+def preparation_needed(project: Project, changes: list[dict]) -> bool:
+    """Offer setup only for managed Python projects with a local environment."""
+    info = environment_info(project)
+    root = project.path / ".venv"
+    if project.read_only or not info["supported"] or root.is_symlink():
+        return False
+    if project.python_interpreter and Path(project.python_interpreter) != _venv_python(
+        root
+    ):
+        return False
+    manifests = {"requirements.txt", "pyproject.toml", "uv.lock"}
+    if project.language == ProjectLanguage.AUTO and not any(
+        (project.path / name).is_file() for name in manifests
+    ):
+        return False
+    return not info["available"] or any(c["path"] in manifests for c in changes)
+
+
+def prepare_environment(project: Project) -> None:
+    """Install declared dependencies only in the project's own .venv."""
+    root = project.path / ".venv"
+    python = _venv_python(root)
+    if (
+        project.read_only
+        or not environment_info(project)["supported"]
+        or root.is_symlink()
+    ):
+        raise ValueError("Preparation requires a managed Python project")
+    if project.python_interpreter and Path(project.python_interpreter) != python:
+        raise ValueError(
+            "Select the project environment before installing dependencies"
+        )
+    uv = shutil.which("uv")
+    if not uv:
+        raise ValueError("uv is not installed or is not on PATH")
+    if not root.exists():
+        create_environment(project)
+    if not python.is_file() or not (root / "pyvenv.cfg").is_file():
+        raise ValueError("The project environment is incomplete")
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        in {
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            "SYSTEMROOT",
+            "TMPDIR",
+            "XDG_CACHE_HOME",
+        }
+    }
+    env["UV_PROJECT_ENVIRONMENT"] = str(root)
+    commands = []
+    if (project.path / "pyproject.toml").is_file():
+        command = [uv, "sync", "--no-python-downloads", "--project", str(project.path)]
+        if (project.path / "uv.lock").is_file():
+            command.append("--locked")
+        commands.append(command)
+    if (project.path / "requirements.txt").is_file():
+        commands.append(
+            [uv, "pip", "install", "--python", str(python), "-r", "requirements.txt"]
+        )
+    for command in commands:
+        result = subprocess.run(
+            command,
+            cwd=project.path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        if result.returncode:
+            raise ValueError(
+                result.stderr.strip()[-4000:] or "Dependency installation failed"
+            )

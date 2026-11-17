@@ -72,3 +72,5 @@ export const copyEntries = (id:string,paths:string[],parent:string,authorize_exi
 export type PythonEnvironment = { supported: boolean; path: string | null; version: string | null; source: 'selected' | 'detected' | 'none'; available: boolean; venv_exists: boolean; uv_available: boolean };
 export const getPythonEnvironment = (id: string) => request<PythonEnvironment>(`/projects/${encodeURIComponent(id)}/python-environment`);
 export const updatePythonEnvironment = (id: string, action: 'create' | 'select' | 'reset', path?: string) => request<PythonEnvironment>(`/projects/${encodeURIComponent(id)}/python-environment`, { method: 'POST', body: JSON.stringify({ action, path, confirmed: true }) });
+
+export const prepareProposalPython = (id: string, confirmed: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/prepare-python`, {method:'POST', body:JSON.stringify({confirmed})});

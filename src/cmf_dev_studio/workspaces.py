@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from threading import Thread
@@ -25,7 +26,11 @@ from cmf_dev_studio.project_runners import (
 )
 from cmf_dev_studio.projects.manager import ProjectManager
 from cmf_dev_studio.projects.models import ProjectLanguage
-from cmf_dev_studio.projects.python_environment import environment_info
+from cmf_dev_studio.projects.python_environment import (
+    environment_info,
+    preparation_needed,
+    prepare_environment,
+)
 
 EXCLUDED = {
     ".git",
@@ -317,6 +322,41 @@ class WorkspaceService:
                 json.dumps(details),
             ),
         )
+
+    def prepare_python(self, proposal_id: str, confirmed: bool) -> dict:
+        """Record the user's setup decision and result in the existing conversation."""
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            events = [
+                e["kind"] for e in row["events"] if e["kind"].startswith("environment_")
+            ]
+            if (
+                row["status"] != "applied"
+                or not events
+                or events[-1] not in {"environment_offered", "environment_failed"}
+            ):
+                raise WorkspaceError("No pending environment preparation")
+            project = self.manager.get(row["project_id"])
+            if project is None:
+                raise WorkspaceError("Project no longer exists")
+            with self._db() as db:
+                self._event(
+                    db,
+                    proposal_id,
+                    "environment_approved" if confirmed else "environment_skipped",
+                )
+            if confirmed:
+                try:
+                    prepare_environment(project)
+                except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                    with self._db() as db:
+                        self._event(
+                            db, proposal_id, "environment_failed", error=str(exc)
+                        )
+                else:
+                    with self._db() as db:
+                        self._event(db, proposal_id, "environment_ready")
+            return self.get(proposal_id)
 
     def defer(self, proposal_id: str, action: str) -> dict:
         with _APPLY_LOCK:
@@ -1060,6 +1100,8 @@ def _apply_proposal(
                     (proposal_id,),
                 )
                 self._event(db, proposal_id, "changes_applied", count=len(changes))
+                if preparation_needed(project, changes):
+                    self._event(db, proposal_id, "environment_offered")
         except Exception:
             for target, old in reversed(touched):
                 if old is None:
