@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.event.pull_request.head.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Checkout merged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          persist-credentials: false
+
+      - name: Validate release and publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/release-notes.md"
+          version=$(python3 scripts/release.py "$RELEASE_BRANCH" --notes "$notes")
+          tag="v$version"
+          test "$(git rev-parse HEAD)" = "$MERGE_SHA"
+
+          # Resolve existing lightweight or annotated tags to their commit.
+          refs=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}")
+          if [[ -n "$refs" ]]; then
+            target=$(printf '%s\n' "$refs" | awk 'END {print $1}')
+            if [[ "$target" != "$MERGE_SHA" ]]; then
+              echo "Tag $tag already points to a different commit" >&2
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$MERGE_SHA" --silent
+          fi
+
+          # A rerun after successful publication is a no-op. If creation fails,
+          # the tag remains available for a retry of the same workflow run.
+          if gh release view "$tag" --json isDraft,isPrerelease --jq \
+            'if .isDraft or .isPrerelease then error("Existing release is not a stable publication") else true end' > /dev/null; then
+            echo "Release $tag already published"
+          else
+            gh release create "$tag" --verify-tag --title "CMF Dev Studio $tag" \
+              --notes-file "$notes"
+          fi
