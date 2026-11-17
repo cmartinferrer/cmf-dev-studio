@@ -54,6 +54,7 @@ The project remains an ongoing learning and engineering initiative. By releasing
 - **Iterative review:** bounded functional review and test-quality guidance; failed tests can trigger a user-requested repair, with fresh approval before executing a changed proposal.
 - **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider. The active file is suggested automatically; additional files can be selected manually or through the explorer.
 - **Conversational workflow:** inline approvals, persisted chat history and retries with original or updated context.
+- **Fresh investigation context:** historical assistant answers are reused only when the bounded project snapshot is unchanged. After a source change, user requests remain available for continuity, but old answers are omitted from the model context. Current dependencies require fresh evidence and exploration approval when needed. The visible chat history is preserved.
 - **Human-controlled application:** review and test isolated changes before explicitly applying them to the original project.
 - **Local persistence:** SQLite project registry and proposal history, with snapshots stored on disk.
 

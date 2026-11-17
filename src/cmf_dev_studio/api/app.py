@@ -37,6 +37,7 @@ from cmf_dev_studio.projects.python_environment import (
     select_interpreter,
 )
 from cmf_dev_studio.projects.search import search_files
+from cmf_dev_studio.terminal_context import TerminalContext
 from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 
 
@@ -505,7 +506,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     class ProposalRequest(BaseModel):
-        task: str = Field(min_length=1, max_length=4000)
+        terminal_context: list[TerminalContext] = Field(
+            default_factory=list, max_length=3
+        )
+        task: str = Field(min_length=1, max_length=24000)
+        assistant_language: str = Field(default="", pattern="^(Spanish|English)?$")
         context_paths: list[str] = Field(default_factory=list, max_length=8)
         context_digest: str | None = None
 
@@ -515,7 +520,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def create_proposal(project_id: str, request: ProposalRequest) -> dict:
         try:
             return workspaces.submit(
-                project_id, request.task, request.context_paths, request.context_digest
+                project_id,
+                request.task,
+                request.context_paths,
+                request.context_digest,
+                [item.model_dump() for item in request.terminal_context],
+                request.assistant_language,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -592,6 +602,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                 request.context_paths,
                 request.context_digest,
             )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    class ExplorationDecision(BaseModel):
+        allow: StrictBool
+
+    @app.post("/api/proposals/{proposal_id}/exploration-decision")
+    def exploration_decision(proposal_id: str, request: ExplorationDecision) -> dict:
+        try:
+            return workspaces.exploration_decision(proposal_id, request.allow)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (ValueError, OSError) as exc:

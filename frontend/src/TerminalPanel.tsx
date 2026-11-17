@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
+import type { TerminalReader } from './terminalContext';
 import { Play, Square } from 'lucide-react';
 
 /** Interactive human-controlled PTY. No agent has access to this socket. */
-export default function TerminalPanel({projectId,runPath,visible}:{projectId:string;runPath?:string;visible:boolean}) {
+export default function TerminalPanel({projectId,runPath,visible,sessionId,readers}:{projectId:string;runPath?:string;visible:boolean;sessionId:number;readers:Map<number,TerminalReader>}) {
   const container=useRef<HTMLDivElement|null>(null);
   const terminal=useRef<Terminal|null>(null);
   const socket=useRef<WebSocket|null>(null);
@@ -16,6 +17,7 @@ export default function TerminalPanel({projectId,runPath,visible}:{projectId:str
   useEffect(()=>{
     if(!container.current)return;
     const term=new Terminal({cursorBlink:true,convertEol:true,fontSize:12,fontFamily: ['"JetBrainsMono Nerd Font Mono"', '"MesloLGS NF"', '"Droid Sans Mono for Powerline"', '"Meslo LG M for Powerline"', '"DejaVu Sans Mono for Powerline"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'].join(', '),theme:{background:'#0c1320',foreground:'#d7e1f2'},scrollback:3000});
+    readers.set(sessionId,()=>{const buffer=term.buffer.active;const lines:string[]=[];for(let i=Math.max(0,buffer.length-200);i<buffer.length;i++){const line=buffer.getLine(i);const text=line?.translateToString(true)??'';if(line?.isWrapped&&lines.length)lines[lines.length-1]+=text;else lines.push(text);}return lines.join('\n').trimEnd();});
     const addon=new FitAddon();term.loadAddon(addon);term.open(container.current);terminal.current=term;fit.current=addon;
     const resize=()=>{if(!container.current?.getClientRects().length)return;try{addon.fit();if(socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}));}catch{ /* panel not visible yet */ }};
     const observer=new ResizeObserver(resize);observer.observe(container.current);
@@ -29,8 +31,8 @@ export default function TerminalPanel({projectId,runPath,visible}:{projectId:str
     });
     const input=term.onData(data=>{if(socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'input',data}));});
     const frame=requestAnimationFrame(()=>{resize();start(runPath);});
-    return()=>{cancelAnimationFrame(frame);socket.current?.close();socket.current=null;input.dispose();observer.disconnect();term.dispose();terminal.current=null;fit.current=null;};
-  },[projectId,runPath]);
+    return()=>{readers.delete(sessionId);cancelAnimationFrame(frame);socket.current?.close();socket.current=null;input.dispose();observer.disconnect();term.dispose();terminal.current=null;fit.current=null;};
+  },[projectId,runPath,sessionId,readers]);
   useEffect(()=>{if(!visible)return;const frame=requestAnimationFrame(()=>{fit.current?.fit();const term=terminal.current;if(term&&socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'resize',cols:term.cols,rows:term.rows}));term?.focus();});return()=>cancelAnimationFrame(frame);},[visible]);
   function start(path?:string){
     if(socket.current)return;

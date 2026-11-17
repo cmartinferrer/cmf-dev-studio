@@ -1,3 +1,4 @@
+import type { TerminalContext } from './terminalContext';
 export type ProjectLanguage = 'auto' | 'python' | 'java' | 'kotlin';
 export const projectLanguageLabels: Record<ProjectLanguage, string> = { auto: 'Auto', python: 'Python', java: 'Java', kotlin: 'Kotlin' };
 export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean; language: ProjectLanguage };
@@ -35,9 +36,9 @@ export const getRepositoryInsights = (projectId: string) => request<RepositoryIn
 export const previewRepositoryContext = (projectId: string, paths: string[]) => request<ContextPreview>(`/projects/${encodeURIComponent(projectId)}/context/preview`, { method: 'POST', body: JSON.stringify({ paths }) });
 
 export type ProposalChange = { action: 'create' | 'modify' | 'delete'; path: string; diff: string; before_sha256: string | null; size: number };
-export type ProposalEvent = { sequence:number; kind:string; created_at:string; details:{environment?:string; command?:string[]; output?:string; count?:number; stage?:string; error?:string; context_paths?:string[]; context_changed?:boolean; repair_cancelled?:boolean} };
-export type Proposal = { events?: ProposalEvent[]; approved_paths?: string[]; id: string; project_id: string; status: 'queued' | 'running' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
-export const createProposal = (projectId: string, task: string, contextPaths: string[], contextDigest: string | null) => request<Proposal>(`/projects/${encodeURIComponent(projectId)}/proposals`, { method: 'POST', body: JSON.stringify({ task, context_paths: contextPaths, context_digest: contextDigest }) });
+export type ProposalEvent = { sequence:number; kind:string; created_at:string; details:{message?:string; action?:string; query?:string; environment?:string; command?:string[]; output?:string; count?:number; stage?:string; error?:string; context_paths?:string[]; context_changed?:boolean; repair_cancelled?:boolean} };
+export type Proposal = { assistant_language?:string; terminal_context?: TerminalContext[]; events?: ProposalEvent[]; approved_paths?: string[]; id: string; project_id: string; status: 'queued' | 'running' | 'awaiting_exploration' | 'answered' | 'ready' | 'failed' | 'tested' | 'test_failed' | 'applied'; test_output?: string; agent_stage?: string; attempts?: number; plan?: {requirements:string[]; acceptance:string[]}; task: string; created_at: string; error: string; changes: ProposalChange[] };
+export const createProposal = (projectId: string, task: string, contextPaths: string[], contextDigest: string | null, terminalContext:TerminalContext[] = [], assistantLanguage = "English") => request<Proposal>(`/projects/${encodeURIComponent(projectId)}/proposals`, { method: 'POST', body: JSON.stringify({ task, context_paths: contextPaths, context_digest: contextDigest, terminal_context: terminalContext, assistant_language: assistantLanguage }) });
 export const listProposals = (projectId: string) => request<Proposal[]>(`/projects/${encodeURIComponent(projectId)}/proposals`);
 export const getProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}`);
 
@@ -79,3 +80,5 @@ export type Jdk = { path: string; version: string };
 export type JdkEnvironment = { supported: boolean; current: Jdk | null; available: Jdk[]; source: 'selected' | 'detected' | 'none' };
 export const getJdk = (id: string) => request<JdkEnvironment>(`/projects/${encodeURIComponent(id)}/jdk`);
 export const updateJdk = (id: string, path: string | null) => request<JdkEnvironment>(`/projects/${encodeURIComponent(id)}/jdk`, { method: 'POST', body: JSON.stringify({ path }) });
+
+export const decideExploration = (id:string, allow:boolean) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/exploration-decision`, {method:"POST",body:JSON.stringify({allow})});

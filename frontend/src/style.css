@@ -212,3 +212,10 @@
 .terminal-color-grid .terminal-color-swatch:hover,.terminal-color-grid .terminal-color-swatch:focus-visible{outline:2px solid #e2e8f0;outline-offset:2px}
 .terminal-empty{display:flex;flex:1;align-items:center;justify-content:center;flex-direction:column;gap:9px;color:#8795aa;font-size:12px}
 .terminal-empty button{background:#253147;border:1px solid #354158;border-radius:5px;color:#dce5f4;padding:6px 12px;cursor:pointer}
+
+.chat-terminal-attachment { display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid #40516a; border-radius:6px; min-width:0; }
+.chat-terminal-attachment details { flex:1; min-width:0; }
+.chat-terminal-attachment summary { cursor:pointer; font-size:12px; overflow-wrap:anywhere; }
+.chat-terminal-attachment summary svg { vertical-align:middle; }
+.chat-terminal-attachment button { background:transparent; border:0; color:inherit; cursor:pointer; }
+.chat-terminal-attachment pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
