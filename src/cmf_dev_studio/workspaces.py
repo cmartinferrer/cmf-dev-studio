@@ -300,6 +300,7 @@ class WorkspaceService:
                     "ALTER TABLE workspace_proposals ADD COLUMN test_output TEXT NOT NULL DEFAULT ''"
                 )
             for name, definition in [
+                ("conversation_id", "TEXT"),
                 ("approved_paths", "TEXT NOT NULL DEFAULT '[]'"),
                 ("assistant_language", "TEXT NOT NULL DEFAULT ''"),
                 ("terminal_context", "TEXT NOT NULL DEFAULT '[]'"),
@@ -316,6 +317,107 @@ class WorkspaceService:
             db.execute("""CREATE TABLE IF NOT EXISTS proposal_events (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
                 kind TEXT NOT NULL, created_at TEXT NOT NULL, details TEXT NOT NULL)""")
+
+            db.execute("""CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+            db.execute(
+                "CREATE INDEX IF NOT EXISTS proposals_conversation ON workspace_proposals(conversation_id)"
+            )
+            for row in db.execute(
+                "SELECT DISTINCT project_id FROM workspace_proposals WHERE conversation_id IS NULL"
+            ).fetchall():
+                self._conversation(db, row[0])
+
+    def _conversation(self, db, project_id, conversation_id=None):
+        if conversation_id is None:
+            conversation_id = "legacy-" + project_id
+            db.execute(
+                "INSERT OR IGNORE INTO conversations VALUES (?,?,?,?,?)",
+                (
+                    conversation_id,
+                    project_id,
+                    "Conversation",
+                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            db.execute(
+                "UPDATE workspace_proposals SET conversation_id=? WHERE project_id=? AND conversation_id IS NULL",
+                (conversation_id, project_id),
+            )
+        row = db.execute(
+            "SELECT * FROM conversations WHERE id=? AND project_id=?",
+            (conversation_id, project_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError("Conversation not found")
+        return dict(row)
+
+    def conversations(self, project_id):
+        if self.manager.get(project_id) is None:
+            raise KeyError("Project not found")
+        with _APPLY_LOCK, self._db() as db:
+            if db.execute(
+                "SELECT 1 FROM workspace_proposals WHERE project_id=? AND conversation_id IS NULL",
+                (project_id,),
+            ).fetchone():
+                self._conversation(db, project_id)
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM conversations WHERE project_id=? ORDER BY updated_at DESC, id",
+                    (project_id,),
+                )
+            ]
+
+    def create_conversation(self, project_id):
+        if self.manager.get(project_id) is None:
+            raise KeyError("Project not found")
+        now = datetime.now(timezone.utc).isoformat()
+        cid = uuid4().hex
+        with _APPLY_LOCK, self._db() as db:
+            db.execute(
+                "INSERT INTO conversations VALUES (?,?,?,?,?)",
+                (cid, project_id, "New conversation", now, now),
+            )
+            return self._conversation(db, project_id, cid)
+
+    def rename_conversation(self, project_id, cid, title):
+        title = title.strip()
+        if not title or len(title) > 120:
+            raise WorkspaceError("Conversation title must contain 1–120 characters")
+        with _APPLY_LOCK, self._db() as db:
+            self._conversation(db, project_id, cid)
+            db.execute("UPDATE conversations SET title=? WHERE id=?", (title, cid))
+            return self._conversation(db, project_id, cid)
+
+    def remove_conversation(self, project_id, cid, clear=False):
+        with _APPLY_LOCK, self._db() as db:
+            self._conversation(db, project_id, cid)
+            rows = db.execute(
+                "SELECT id,status FROM workspace_proposals WHERE conversation_id=?",
+                (cid,),
+            ).fetchall()
+            if any(r["status"] in ("queued", "running") for r in rows):
+                raise WorkspaceError("Wait for the active AI operation")
+            for row in rows:
+                db.execute(
+                    "DELETE FROM proposal_events WHERE proposal_id=?", (row["id"],)
+                )
+                db.execute("DELETE FROM workspace_proposals WHERE id=?", (row["id"],))
+            if not clear:
+                db.execute("DELETE FROM conversations WHERE id=?", (cid,))
+            else:
+                db.execute(
+                    "UPDATE conversations SET updated_at=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), cid),
+                )
+        for row in rows:
+            self._test_approvals.pop(row["id"], None)
+            shutil.rmtree(self.root / row["id"], ignore_errors=True)
+            shutil.rmtree(self.baselines / row["id"], ignore_errors=True)
+        return {"deleted": True}
 
     def move_resource(self, project_id, operation):
         """Invalidate pending proposals when the project layout changes."""
@@ -571,7 +673,9 @@ class WorkspaceService:
         """Keep user intent but omit answers from different project snapshots."""
         history = []
         current_digest = tree_digest(self.baselines / proposal_id)
-        for previous in reversed(self.list(row["project_id"])[:8]):
+        for previous in reversed(
+            self.list(row["project_id"], row.get("conversation_id"))[:8]
+        ):
             if (
                 previous["id"] == proposal_id
                 or previous["created_at"] >= row["created_at"]
@@ -718,13 +822,15 @@ class WorkspaceService:
         ]
         return row
 
-    def list(self, project_id: str) -> list[dict]:
+    def list(self, project_id: str, conversation_id: str | None = None) -> list[dict]:
         with self._db() as db:
+            if conversation_id is not None:
+                self._conversation(db, project_id, conversation_id)
             ids = [
                 r[0]
                 for r in db.execute(
-                    "SELECT id FROM workspace_proposals WHERE project_id=? ORDER BY created_at DESC",
-                    (project_id,),
+                    "SELECT id FROM workspace_proposals WHERE project_id=? AND (? IS NULL OR conversation_id=?) ORDER BY created_at DESC",
+                    (project_id, conversation_id, conversation_id),
                 )
             ]
         return [self.get(i) for i in ids]
@@ -737,6 +843,7 @@ class WorkspaceService:
         context_digest: str | None = None,
         terminal_context: list[dict] | None = None,
         assistant_language: str = "",
+        conversation_id: str | None = None,
     ) -> dict:
         with _APPLY_LOCK:
             return self._submit(
@@ -746,6 +853,7 @@ class WorkspaceService:
                 context_digest,
                 terminal_context,
                 assistant_language,
+                conversation_id,
             )
 
     def _submit(
@@ -756,6 +864,7 @@ class WorkspaceService:
         context_digest: str | None = None,
         terminal_context: list[dict] | None = None,
         assistant_language: str = "",
+        conversation_id: str | None = None,
     ) -> dict:
         terminal_context = normalize_terminal_context(terminal_context)
         project = self.manager.get(project_id)
@@ -772,6 +881,8 @@ class WorkspaceService:
             raise WorkspaceError(
                 "Review and approve repository context before generating a proposal"
             )
+        with self._db() as db:
+            conversation_id = self._conversation(db, project_id, conversation_id)["id"]
         proposal_id = uuid4().hex
         workspace = self.root / proposal_id
         workspace.mkdir()
@@ -809,6 +920,14 @@ class WorkspaceService:
             db.execute(
                 "UPDATE workspace_proposals SET assistant_language=? WHERE id=?",
                 (assistant_language, proposal_id),
+            )
+            db.execute(
+                "UPDATE workspace_proposals SET conversation_id=? WHERE id=?",
+                (conversation_id, proposal_id),
+            )
+            db.execute(
+                "UPDATE conversations SET updated_at=?, title=CASE WHEN title='New conversation' THEN ? ELSE title END WHERE id=?",
+                (now, " ".join(task.split())[:80], conversation_id),
             )
             self._event(db, proposal_id, "requested", context_paths=selected_paths)
         Thread(

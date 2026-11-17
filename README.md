@@ -418,3 +418,6 @@ GitHub: [cmartinferrer](https\://github.com/cmartinferrer)
 CMF Dev Studio is open-source software released under the [MIT License](LICENSE).
 
 Copyright © 2026 Cristian Martín Ferrer.
+### AI conversations
+
+Each project has independent, persistent conversations. Use the assistant history, new conversation and options controls to switch, rename, clear or delete a conversation. Existing proposal history is migrated into an initial conversation automatically. Dates and times use the browser's local timezone. Clearing or deleting a conversation discards its pending proposals and review snapshots, but never reverts project files. Conversation switching and deletion are disabled during active AI operations. The existing project-level proposal API remains available for compatibility.
