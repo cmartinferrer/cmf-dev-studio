@@ -29,6 +29,7 @@ class Project:
 
     python_interpreter: str | None = None
     python_version: str | None = None
+    jdk_home: str | None = None
 
     @property
     def read_only(self) -> bool:

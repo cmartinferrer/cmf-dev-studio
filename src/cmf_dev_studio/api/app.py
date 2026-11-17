@@ -29,6 +29,8 @@ from cmf_dev_studio.projects.editor import (
 )
 from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
 from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
+from cmf_dev_studio.projects.jdk_environment import inspect_jdk
 from cmf_dev_studio.projects.python_environment import (
     create_environment,
     environment_info,
@@ -188,6 +190,37 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return environment_info(project)
+
+    class JdkRequest(BaseModel):
+        path: str | None = None
+
+    @app.get("/api/projects/{project_id}/jdk")
+    def get_jdk(project_id: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return jdk_info(project)
+
+    @app.post("/api/projects/{project_id}/jdk")
+    def update_jdk(project_id: str, request: JdkRequest) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not jdk_info(project)["supported"]:
+            raise HTTPException(status_code=422, detail="Not a JVM project")
+        home = None
+        if request.path is not None:
+            candidate = Path(request.path).expanduser()
+            info = inspect_jdk(candidate) if candidate.is_absolute() else None
+            if not info:
+                raise HTTPException(
+                    status_code=422, detail="Select a valid JDK directory"
+                )
+            home = info["path"]
+        project = manager.update_jdk(project_id, home)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return jdk_info(project)
 
     class RenameProjectRequest(BaseModel):
         name: str = Field(min_length=1, max_length=80)

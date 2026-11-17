@@ -74,3 +74,8 @@ export const getPythonEnvironment = (id: string) => request<PythonEnvironment>(`
 export const updatePythonEnvironment = (id: string, action: 'create' | 'select' | 'reset', path?: string) => request<PythonEnvironment>(`/projects/${encodeURIComponent(id)}/python-environment`, { method: 'POST', body: JSON.stringify({ action, path, confirmed: true }) });
 
 export const prepareProposalPython = (id: string, confirmed: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/prepare-python`, {method:'POST', body:JSON.stringify({confirmed})});
+
+export type Jdk = { path: string; version: string };
+export type JdkEnvironment = { supported: boolean; current: Jdk | null; available: Jdk[]; source: 'selected' | 'detected' | 'none' };
+export const getJdk = (id: string) => request<JdkEnvironment>(`/projects/${encodeURIComponent(id)}/jdk`);
+export const updateJdk = (id: string, path: string | null) => request<JdkEnvironment>(`/projects/${encodeURIComponent(id)}/jdk`, { method: 'POST', body: JSON.stringify({ path }) });
