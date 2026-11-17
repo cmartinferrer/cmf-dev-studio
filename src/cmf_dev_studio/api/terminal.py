@@ -19,6 +19,7 @@ from fastapi import WebSocket
 
 from cmf_dev_studio.projects.editor import safe_path
 from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
+from cmf_dev_studio.projects.jvm_run import jvm_run_command
 from cmf_dev_studio.projects.models import Project
 from cmf_dev_studio.projects.python_environment import environment_info
 
@@ -143,16 +144,22 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
     await ws.accept()
     run_path = ws.query_params.get("run")
     command = None
+    startup = None
     if run_path is not None:
         try:
-            command = python_run_command(project, run_path)
+            if project.language.value in ("java", "kotlin"):
+                startup = TemporaryDirectory(prefix="cmf-jvm-run-")
+                command = jvm_run_command(project, run_path, Path(startup.name))
+            else:
+                command = python_run_command(project, run_path)
         except (ValueError, OSError) as exc:
+            if startup is not None:
+                startup.cleanup()
             await ws.send_text(f"\r\n{exc}\r\n")
             await ws.close()
             return
     master, slave = pty.openpty()
     process = None
-    startup = None
     try:
         shell = os.environ.get("SHELL", "/bin/sh")
         if not os.path.isfile(shell) or not os.access(shell, os.X_OK):
@@ -176,7 +183,12 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
         os.close(slave)
         slave = -1
         if command is not None:
-            await ws.send_text(f"Running Python file: {run_path!r}\r\n\r\n")
+            language = (
+                "Python"
+                if project.language.value not in ("java", "kotlin")
+                else project.language.value.capitalize()
+            )
+            await ws.send_text(f"Running {language} file: {run_path!r}\r\n\r\n")
 
         async def output_loop():
             while True:
