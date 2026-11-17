@@ -61,7 +61,7 @@ export default function PythonEnvironmentControl({ project, revision }: { projec
         <button type="button" className="workspace-language-secondary" disabled={busy || !path.trim()} onClick={() => setPending('select')}>Use custom interpreter</button>
       </div>}
       {busy && <small role="status">Working…</small>}{error && <p className="ide-error" role="alert">{error}</p>}
-      <small className="python-environment-note">Restart the terminal after changing Python. AI tests are not connected yet.</small>
+      <small className="python-environment-note">Restart the terminal after changing Python. AI tests use a separate environment.</small>
     </div>}
   </div>;
 }

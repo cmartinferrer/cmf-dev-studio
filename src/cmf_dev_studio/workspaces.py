@@ -18,12 +18,14 @@ from cmf_dev_studio.agents.developer import build_workspace_prompt
 from cmf_dev_studio.contracts import Plan
 from cmf_dev_studio.orchestrator import Orchestrator
 from cmf_dev_studio.project_runners import (
+    RunnerSpec,
     UnsupportedRunner,
     execute_runner,
     select_runner,
 )
 from cmf_dev_studio.projects.manager import ProjectManager
 from cmf_dev_studio.projects.models import ProjectLanguage
+from cmf_dev_studio.projects.python_environment import environment_info
 
 EXCLUDED = {
     ".git",
@@ -881,9 +883,10 @@ def _checked_target(root: Path, path: str) -> Path:
     return target
 
 
-def _test_details(self: WorkspaceService, proposal_id: str) -> dict:
+def _test_details(self: WorkspaceService, proposal_id: str) -> tuple[dict, RunnerSpec]:
     row = self.get(proposal_id)
-    if self.manager.get(row["project_id"]) is None:
+    project = self.manager.get(row["project_id"])
+    if project is None:
         raise WorkspaceError("Project no longer exists")
     if (
         row["status"] == "test_failed"
@@ -897,24 +900,31 @@ def _test_details(self: WorkspaceService, proposal_id: str) -> dict:
     if not workspace.is_dir():
         raise WorkspaceError("Proposal workspace missing")
     try:
-        spec = select_runner(workspace)
+        environment = environment_info(project)
+        python = environment["path"] if environment["supported"] else None
+        spec = select_runner(workspace, python)
+        if spec.name == "pytest" and python and not environment["available"]:
+            raise UnsupportedRunner("Selected Python interpreter is unavailable")
     except UnsupportedRunner as exc:
         raise WorkspaceError(str(exc)) from exc
     command = list(spec.command)
     approval = hashlib.sha256(
         json.dumps([proposal_id, tree_digest(workspace), command]).encode()
     ).hexdigest()
-    return {
-        "command": command,
-        "approval": approval,
-        "working_directory": "Temporary copy of proposal",
-        "timeout": spec.timeout,
-    }
+    return (
+        {
+            "command": command,
+            "approval": approval,
+            "working_directory": "Temporary copy of proposal",
+            "timeout": spec.timeout,
+        },
+        spec,
+    )
 
 
 def _test_preview(self: WorkspaceService, proposal_id: str) -> dict:
     with _APPLY_LOCK:
-        details = _test_details(self, proposal_id)
+        details, _ = _test_details(self, proposal_id)
         token = uuid4().hex
         self._test_approvals[proposal_id] = (token, details["approval"])
         return {**details, "approval": token}
@@ -924,7 +934,7 @@ def _test_proposal(
     self: WorkspaceService, proposal_id: str, approval: str = ""
 ) -> dict:
     with _APPLY_LOCK:
-        preview = _test_details(self, proposal_id)
+        preview, spec = _test_details(self, proposal_id)
         expected = self._test_approvals.get(proposal_id)
         if not approval or expected != (approval, preview["approval"]):
             raise WorkspaceError(
@@ -932,7 +942,6 @@ def _test_proposal(
             )
         self._test_approvals.pop(proposal_id, None)
         workspace = self.root / proposal_id
-        spec = select_runner(workspace)
         before = tree_digest(workspace)
         with self._db() as db:
             db.execute(
