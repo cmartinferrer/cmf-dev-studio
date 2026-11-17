@@ -1,10 +1,10 @@
-
 version: 2
 
 updates:
   # Python dependencies
   - package-ecosystem: "uv"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -21,6 +21,7 @@ updates:
   # Frontend dependencies
   - package-ecosystem: "npm"
     directory: "/frontend"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -37,6 +38,7 @@ updates:
   # GitHub Actions dependencies
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "develop"
     schedule:
       interval: "weekly"
       day: "monday"
