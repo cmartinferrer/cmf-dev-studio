@@ -38,7 +38,7 @@ class ProjectManager:
                     "ALTER TABLE projects ADD COLUMN language TEXT NOT NULL DEFAULT 'auto'"
                 )
 
-            for column in ("python_interpreter", "python_version"):
+            for column in ("python_interpreter", "python_version", "jdk_home"):
                 if column not in columns:
                     db.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
 
@@ -68,6 +68,7 @@ class ProjectManager:
             language=ProjectLanguage(row["language"]),
             python_interpreter=row["python_interpreter"],
             python_version=row["python_version"],
+            jdk_home=row["jdk_home"],
         )
 
     def _insert(
@@ -169,6 +170,12 @@ class ProjectManager:
                 "UPDATE projects SET python_interpreter=?, python_version=? WHERE id=?",
                 (path, version, project_id),
             )
+        return self.get(project_id)
+
+    def update_jdk(self, project_id: str, home: str | None) -> Project | None:
+        """Persist the selected JDK without modifying project files."""
+        with self._connect() as db:
+            db.execute("UPDATE projects SET jdk_home=? WHERE id=?", (home, project_id))
         return self.get(project_id)
 
     def list_projects(self) -> list[Project]:

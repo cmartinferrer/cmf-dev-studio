@@ -10,6 +10,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from threading import Thread
@@ -24,6 +25,8 @@ from cmf_dev_studio.project_runners import (
     execute_runner,
     select_runner,
 )
+from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
+from cmf_dev_studio.projects.jvm_preparation import preparation_spec, prepare_jvm
 from cmf_dev_studio.projects.manager import ProjectManager
 from cmf_dev_studio.projects.models import ProjectLanguage
 from cmf_dev_studio.projects.python_environment import (
@@ -54,6 +57,20 @@ MAX_FILES = 350
 MAX_BYTES = 3_000_000
 MAX_FILE = 150_000
 MAX_REPAIRS = 3
+# Existing build infrastructure is copied verbatim, never edited by agents.
+WRAPPER_FILES = frozenset(
+    {
+        "mvnw",
+        "gradlew",
+        ".mvn/wrapper/maven-wrapper.properties",
+        ".mvn/wrapper/maven-wrapper.jar",
+        ".mvn/wrapper/MavenWrapperDownloader.java",
+        ".mvn/maven.config",
+        ".mvn/jvm.config",
+        "gradle/wrapper/gradle-wrapper.properties",
+        "gradle/wrapper/gradle-wrapper.jar",
+    }
+)
 
 
 class WorkspaceError(ValueError):
@@ -125,7 +142,7 @@ def tree_digest(root: Path) -> str:
 
 
 def snapshot(source: Path, target: Path) -> dict[str, bytes]:
-    """Copy a bounded set of safe text files, without following symlinks."""
+    """Copy bounded text files and existing wrapper assets without symlinks."""
     copied: dict[str, bytes] = {}
     total = 0
     for root, dirs, files in os.walk(source, followlinks=False):
@@ -134,7 +151,7 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
             d
             for d in dirs
             if d not in EXCLUDED
-            and not d.startswith(".")
+            and (not d.startswith(".") or (base == source and d == ".mvn"))
             and not (base / d).is_symlink()
         )
         for filename in sorted(files):
@@ -147,10 +164,12 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
             ):
                 continue
             relative = file.relative_to(source).as_posix()
-            try:
-                safe_path(relative)
-            except WorkspaceError:
-                continue
+            wrapper = relative in WRAPPER_FILES
+            if not wrapper:
+                try:
+                    safe_path(relative)
+                except WorkspaceError:
+                    continue
             size = file.stat().st_size
             if size > MAX_FILE:
                 continue
@@ -159,10 +178,11 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
                     "Repository exceeds safe workspace snapshot limits"
                 )
             raw = file.read_bytes()
-            try:
-                raw.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
+            if not (wrapper and relative.endswith(".jar")):
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
             dest = target / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(raw)
@@ -324,38 +344,48 @@ class WorkspaceService:
         )
 
     def prepare_python(self, proposal_id: str, confirmed: bool) -> dict:
-        """Record the user's setup decision and result in the existing conversation."""
+        """Record an approved Python or JVM setup in the existing conversation."""
         with _APPLY_LOCK:
             row = self.get(proposal_id)
-            events = [
-                e["kind"] for e in row["events"] if e["kind"].startswith("environment_")
-            ]
+            events = [e for e in row["events"] if e["kind"].startswith("environment_")]
             if (
                 row["status"] != "applied"
                 or not events
-                or events[-1] not in {"environment_offered", "environment_failed"}
+                or events[-1]["kind"]
+                not in {"environment_offered", "environment_failed"}
             ):
                 raise WorkspaceError("No pending environment preparation")
             project = self.manager.get(row["project_id"])
             if project is None:
                 raise WorkspaceError("Project no longer exists")
+            kind = events[-1]["details"].get("environment", "python")
             with self._db() as db:
                 self._event(
                     db,
                     proposal_id,
                     "environment_approved" if confirmed else "environment_skipped",
+                    environment=kind,
                 )
             if confirmed:
                 try:
-                    prepare_environment(project)
+                    if kind == "jvm":
+                        prepare_jvm(project)
+                    else:
+                        prepare_environment(project)
                 except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
                     with self._db() as db:
                         self._event(
-                            db, proposal_id, "environment_failed", error=str(exc)
+                            db,
+                            proposal_id,
+                            "environment_failed",
+                            error=str(exc),
+                            environment=kind,
                         )
                 else:
                     with self._db() as db:
-                        self._event(db, proposal_id, "environment_ready")
+                        self._event(
+                            db, proposal_id, "environment_ready", environment=kind
+                        )
             return self.get(proposal_id)
 
     def defer(self, proposal_id: str, action: str) -> dict:
@@ -677,7 +707,9 @@ class WorkspaceService:
                 except OSError:
                     pass
         for relative, previous in original.items():
-            dest = workspace / safe_path(relative)
+            dest = workspace / (
+                Path(relative) if relative in WRAPPER_FILES else safe_path(relative)
+            )
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(previous)
         changes = []
@@ -945,11 +977,28 @@ def _test_details(self: WorkspaceService, proposal_id: str) -> tuple[dict, Runne
         spec = select_runner(workspace, python)
         if spec.name == "pytest" and python and not environment["available"]:
             raise UnsupportedRunner("Selected Python interpreter is unavailable")
+        if spec.name in ("maven", "gradle"):
+            # A new AUTO project may only have a JVM manifest in the proposal.
+            jdk_project = replace(project, language=ProjectLanguage.JAVA)
+            jdk = jdk_info(jdk_project)["current"]
+            if not jdk:
+                raise UnsupportedRunner(
+                    "No available JDK. Select a valid project JDK before testing"
+                )
+            spec = replace(spec, jdk_home=jdk["path"], jdk_version=jdk["version"])
     except UnsupportedRunner as exc:
         raise WorkspaceError(str(exc)) from exc
     command = list(spec.command)
     approval = hashlib.sha256(
-        json.dumps([proposal_id, tree_digest(workspace), command]).encode()
+        json.dumps(
+            [
+                proposal_id,
+                tree_digest(workspace),
+                command,
+                spec.jdk_home,
+                spec.jdk_version,
+            ]
+        ).encode()
     ).hexdigest()
     return (
         {
@@ -1100,7 +1149,11 @@ def _apply_proposal(
                     (proposal_id,),
                 )
                 self._event(db, proposal_id, "changes_applied", count=len(changes))
-                if preparation_needed(project, changes):
+                if preparation_spec(project):
+                    self._event(
+                        db, proposal_id, "environment_offered", environment="jvm"
+                    )
+                elif preparation_needed(project, changes):
                     self._event(db, proposal_id, "environment_offered")
         except Exception:
             for target, old in reversed(touched):
