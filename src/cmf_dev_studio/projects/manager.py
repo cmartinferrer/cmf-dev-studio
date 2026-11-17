@@ -38,6 +38,10 @@ class ProjectManager:
                     "ALTER TABLE projects ADD COLUMN language TEXT NOT NULL DEFAULT 'auto'"
                 )
 
+            for column in ("python_interpreter", "python_version"):
+                if column not in columns:
+                    db.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
+
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
@@ -62,6 +66,8 @@ class ProjectManager:
             description=row["description"],
             created_at=row["created_at"],
             language=ProjectLanguage(row["language"]),
+            python_interpreter=row["python_interpreter"],
+            python_version=row["python_version"],
         )
 
     def _insert(
@@ -153,6 +159,17 @@ class ProjectManager:
                 "SELECT * FROM projects WHERE id = ?", (project_id,)
             ).fetchone()
         return self._from_row(row) if row else None
+
+    def update_python_interpreter(
+        self, project_id: str, path: str | None, version: str | None
+    ) -> Project | None:
+        """Persist interpreter metadata without modifying project files."""
+        with self._connect() as db:
+            db.execute(
+                "UPDATE projects SET python_interpreter=?, python_version=? WHERE id=?",
+                (path, version, project_id),
+            )
+        return self.get(project_id)
 
     def list_projects(self) -> list[Project]:
         with self._connect() as db:

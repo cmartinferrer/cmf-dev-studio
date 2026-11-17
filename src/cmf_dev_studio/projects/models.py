@@ -27,6 +27,9 @@ class Project:
     created_at: str
     language: ProjectLanguage = ProjectLanguage.AUTO
 
+    python_interpreter: str | None = None
+    python_version: str | None = None
+
     @property
     def read_only(self) -> bool:
         """Existing repositories are registered but never edited by this layer."""

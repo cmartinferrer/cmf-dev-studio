@@ -199,6 +199,6 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
       <div className="ide-ai-content"><AIChat projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} activePath={review||selected?.isNew?null:active} dirtyPaths={tabs.filter(t=>t.dirty).map(t=>t.path)} excluded={excluded} onExclude={path=>{setExcluded(old=>[...new Set([...old,path])]);onApprove(approved.filter(p=>p!==path),null);}} onAddContext={addContext} revision={revision} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)}/></div>
     </aside>}
     {resource&&<ResourceActions target={resource} onClose={()=>setResource(null)}/>}
-    <WorkspaceStatusBar key={project.id} project={project} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)}/>
+    <WorkspaceStatusBar key={project.id} project={project} revision={revision} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)}/>
   </div>;
 }
