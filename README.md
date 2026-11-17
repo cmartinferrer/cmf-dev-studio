@@ -218,6 +218,10 @@ Open [http\://127.0.0.1:5173](http\://127.0.0.1:5173). The frontend proxies API 
 7. For managed projects, optionally approve project preparation after applying changes. Python preparation creates or reuses a project virtual environment and installs declared dependencies; JVM preparation compiles and tests the actual project.
 8. Open a supported source or test file and use **Run** to execute it in the integrated terminal. Use **Stop** or **Run again** to control the execution.
 
+### Workspace layout
+
+The top bar displays the Studio brand only. Use Overview to create, open or switch projects. Right-click the project root in Explorer to rename the active project. The compact tool rail provides Overview, Explorer, AI Assistant and Terminal actions. Toggle Explorer or AI Assistant to reclaim editor space; drag the existing separators to resize panels. Explorer and assistant visibility and panel dimensions are remembered in browser local storage across projects and reloads. Hiding a panel preserves its mounted state; switching projects still closes the current workspace and prompts before discarding unsaved edits. Terminal sessions are not restored after a page reload.
+
 ### Project programming language
 
 New managed projects can select Python, Java or Kotlin. The setting is persisted and supplied to the agents during proposal generation. Existing projects may use automatic detection. Runner selection still follows the build files; the language setting is not a security restriction.

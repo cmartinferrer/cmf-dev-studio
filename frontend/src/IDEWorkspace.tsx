@@ -1,7 +1,8 @@
+import { loadPreferences, savePreferences, clamp } from './workspacePreferences';
 import { initialLayout, activate, split, remove, moveTab, closeGroup, remap, visiblePaths } from './editorGroups';
 import { creationParent, creationPath } from './resourceCreation';
 import ResourceActions, { type ResourceTarget } from './ResourceActions';
-import { renameEntry, createDirectory, batchEntries, copyEntries } from './api';
+import { renameProject, renameEntry, createDirectory, batchEntries, copyEntries } from './api';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Editor, { DiffEditor, loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor';
@@ -29,10 +30,10 @@ import WorkspaceStatusBar from './WorkspaceStatusBar';
 import TerminalWorkspace from './TerminalWorkspace';
 import { captureTerminal, type TerminalContext, type TerminalReader } from './terminalContext';
 import { initialSessions, addSession } from './terminalSessions';
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, TerminalSquare } from 'lucide-react';
+import { LayoutGrid, TerminalSquare } from 'lucide-react';
 
 type Tab = { path: string; content: string; saved: string; sha256: string | null; dirty: boolean; isNew: boolean };
-type Props = { onDirtyChange:(dirty:boolean)=>void; project: Project; onProjectUpdated: (project: Project) => void; approved: string[]; digest: string | null; onApprove: (paths:string[],digest:string | null)=>void };
+type Props = { onOverview:()=>void; onDirtyChange:(dirty:boolean)=>void; project: Project; onProjectUpdated: (project: Project) => void; approved: string[]; digest: string | null; onApprove: (paths:string[],digest:string | null)=>void };
 function language(path: string) { const ext=path.split('.').pop()?.toLowerCase(); return ({py:'python',ts:'typescript',tsx:'typescript',js:'javascript',jsx:'javascript',json:'json',md:'markdown',yaml:'yaml',yml:'yaml',toml:'ini',java:'java',kt:'kotlin',kts:'kotlin',xml:'xml',gradle:'groovy',html:'html',css:'css'} as Record<string,string>)[ext||''] || 'plaintext'; }
 type TreeProps = {projectId:string;path?:string;depth?:number;onOpen:(path:string)=>void;revision:number;onMenu:(e:React.MouseEvent,path:string,isFile?:boolean)=>void;dragged:string[];onDrag:(path:string|null)=>void;onMove:(paths:string[],parent:string)=>void;selection:string[];revealParent:{path:string}|null;onSelect:(e:React.MouseEvent,path:string)=>boolean};
 function FolderTree({projectId,path='',depth=0,onOpen,revision,onMenu,dragged,onDrag,onMove,selection,revealParent,onSelect}:TreeProps) {
@@ -50,7 +51,7 @@ function FolderTree({projectId,path='',depth=0,onOpen,revision,onMenu,dragged,on
   const start=(e:React.DragEvent,p:string)=>{e.stopPropagation();e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',p);onDrag(p);};
   return <div>{depth>0&&<button draggable onDragStart={e=>start(e,path)} onDragEnd={()=>onDrag(null)} onDragOver={e=>{if(!valid)return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='move';setOver(true);if(!expanded&&timer.current===null)timer.current=setTimeout(()=>setExpanded(true),650);}} onDragLeave={clear} onDrop={e=>{e.preventDefault();e.stopPropagation();clear();if(valid){setExpanded(true);onMove(dragged,path);}onDrag(null);}} data-entry-kind="directory" data-entry-path={path} aria-pressed={selection.includes(path)} className={`ide-tree-row ${selection.includes(path)?'ide-tree-selected':''} ${over?'ide-drop-target':''}`} style={{paddingLeft:depth*13}} onContextMenu={e=>onMenu(e,path)} onClick={e=>{if(onSelect(e,path))setExpanded(v=>!v);}}>{expanded?<ChevronDown size={13}/>:<ChevronRight size={13}/>}<Folder size={14}/>{path.split('/').pop()}</button>}{expanded&&<>{error&&<small className="ide-error">{error}</small>}{items.map(item=>item.kind==='directory'?<FolderTree key={item.path} {...{projectId,onOpen,revision,onMenu,dragged,onDrag,onMove,selection,revealParent,onSelect}} path={item.path} depth={depth+1}/>:<button draggable onDragStart={e=>start(e,item.path)} onDragEnd={()=>onDrag(null)} key={item.path} data-entry-kind="file" data-entry-path={item.path} aria-pressed={selection.includes(item.path)} className={`ide-tree-row ${selection.includes(item.path)?'ide-tree-selected':''}`} style={{paddingLeft:(depth+1)*13+13}} title={item.path} onContextMenu={e=>onMenu(e,item.path,true)} onClick={e=>{if(onSelect(e,item.path))onOpen(item.path);}}><FileCode size={14}/>{item.name}</button>)}</>}</div>;
 }
-export default function IDEWorkspace({project,approved,digest,onApprove,onProjectUpdated,onDirtyChange}:Props){
+export default function IDEWorkspace({project,approved,digest,onApprove,onProjectUpdated,onDirtyChange,onOverview}:Props){
   const [resource,setResource]=useState<ResourceTarget|null>(null);
   const [languageBusy,setLanguageBusy]=useState(false);
   async function changeProjectLanguage(value: ProjectLanguage) {
@@ -106,7 +107,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     try{const result=await copyEntries(project.id,clipboard,parent,authorized);setRevision(n=>n+1);setReview(null);setMessage(`Copied ${result.completed.length} items`);if(result.error)setError(result.error);}
     catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}
   }
-  function rootMenu(e:React.MouseEvent){e.preventDefault();setSelection([]);anchor.current=null;setResource({name:project.name,x:e.clientX,y:e.clientY,removeLabel:'',warning:'',newFile:()=>beginCreate('file'),newFolder:()=>beginCreate('folder'),paste:clipboard.length?()=>void paste(''):undefined});}
+  function rootMenu(e:React.MouseEvent){e.preventDefault();setSelection([]);anchor.current=null;setResource({name:project.name,x:e.clientX,y:e.clientY,removeLabel:'',warning:'',rename:async name=>{const updated=await renameProject(project.id,name);onProjectUpdated(updated);},newFile:()=>beginCreate('file'),newFolder:()=>beginCreate('folder'),paste:clipboard.length?()=>void paste(''):undefined});}
   function explorerKeys(e:React.KeyboardEvent){
     if(!(e.ctrlKey||e.metaKey)||busy)return;
     const key=e.key.toLowerCase();
@@ -178,11 +179,13 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
       setTerminalSessions(s=>addSession(s,path));setBottom(true);
     }finally{runPending.current=false;}
   }
-  const [explorerVisible,setExplorerVisible]=useState(true);
-  const [assistantVisible,setAssistantVisible]=useState(true);
-  const [explorerWidth,setExplorerWidth]=useState(225);
-  const [assistantWidth,setAssistantWidth]=useState(355);
-  const [terminalHeight,setTerminalHeight]=useState(240);
+  const [preferences]=useState(loadPreferences);
+  const [explorerVisible,setExplorerVisible]=useState(preferences.explorerVisible);
+  const [assistantVisible,setAssistantVisible]=useState(preferences.assistantVisible);
+  const [explorerWidth,setExplorerWidth]=useState(preferences.explorerWidth);
+  const [assistantWidth,setAssistantWidth]=useState(preferences.assistantWidth);
+  const [terminalHeight,setTerminalHeight]=useState(preferences.terminalHeight);
+  useEffect(()=>{savePreferences({explorerVisible,assistantVisible,explorerWidth,assistantWidth,terminalHeight});},[explorerVisible,assistantVisible,explorerWidth,assistantWidth,terminalHeight]);
   const [review,setReview]=useState<{path:string;before:string;after:string}|null>(null);
   useEffect(()=>{setTabs([]);setLayout(initialLayout());setReview(null);setAuthorized(false);setSelection([]);setDragged([]);setClipboard([]);anchor.current=null;},[project.id]);
   const tabsRef=useRef(tabs);tabsRef.current=tabs;
@@ -235,26 +238,27 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     const x=event.clientX,y=event.clientY;
     const initial=target==='explorer'?explorerWidth:target==='assistant'?assistantWidth:terminalHeight;
     const move=(e:PointerEvent)=>{
-      if(target==='explorer')setExplorerWidth(Math.max(150,Math.min(420,initial+e.clientX-x)));
-      else if(target==='assistant')setAssistantWidth(Math.max(270,Math.min(650,initial+x-e.clientX)));
-      else setTerminalHeight(Math.max(130,Math.min(520,initial+y-e.clientY)));
+      if(target==='explorer')setExplorerWidth(clamp(initial+e.clientX-x,150,420));
+      else if(target==='assistant')setAssistantWidth(clamp(initial+x-e.clientX,270,650));
+      else setTerminalHeight(clamp(initial+y-e.clientY,130,520));
     };
-    const end=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',end);};
-    window.addEventListener('pointermove',move);window.addEventListener('pointerup',end);
+    const end=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',end);window.removeEventListener('pointercancel',end);};
+    window.addEventListener('pointermove',move);window.addEventListener('pointerup',end);window.addEventListener('pointercancel',end);
   }
   async function reviewChange(proposalId:string,change:ProposalChange){
     try { const diff=await previewProposalFile(proposalId,change.path);setReview(diff);setError(''); }
     catch(e){setError(e instanceof Error?e.message:String(e));}
   }
-  return <div className="ide-root ide-v32" style={{gridTemplateColumns:`${explorerVisible?`${explorerWidth}px 5px `:""}minmax(0,1fr)${assistantVisible?` 5px ${assistantWidth}px`:""}`}}>
-    {explorerVisible&&<aside className="ide-explorer"><div className="ide-pane-title"><FolderOpen size={15}/> EXPLORER <button title="Refresh files" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={14}/></button><button title="New resource" aria-expanded={createMenu} onClick={()=>setCreateMenu(v=>!v)}><Plus size={15}/></button></div>
+  return <div className="ide-root ide-v32 studio-workspace" style={{gridTemplateColumns:`42px ${explorerVisible?`min(${explorerWidth}px, 26%) 5px `:""}minmax(0,1fr)${assistantVisible?` 5px min(${assistantWidth}px, 40%)`:""}`}}>
+    <nav className="studio-tools" aria-label="Editor tools"><button title="Overview" aria-label="Overview" onClick={onOverview}><LayoutGrid size={20}/></button><button title="Toggle explorer" aria-label="Toggle explorer" aria-pressed={explorerVisible} onClick={()=>setExplorerVisible(v=>!v)}><FolderOpen size={20}/></button><button title="Toggle AI assistant" aria-label="Toggle AI assistant" aria-pressed={assistantVisible} onClick={()=>setAssistantVisible(v=>!v)}><Bot size={20}/></button><button title="Toggle terminal" aria-label="Toggle terminal" aria-pressed={bottom} onClick={()=>bottom?closeTerminal():openTerminal()}><TerminalSquare size={20}/></button></nav>
+    {<aside className="ide-explorer" style={{display:explorerVisible?undefined:'none'}}><div className="ide-pane-title"><FolderOpen size={15}/> EXPLORER <button title="Refresh files" onClick={()=>setRevision(n=>n+1)}><RefreshCw size={14}/></button><button title="New resource" aria-expanded={createMenu} onClick={()=>setCreateMenu(v=>!v)}><Plus size={15}/></button></div>
       {createMenu&&<div className="ide-create-menu"><button onClick={()=>beginCreate('file',selectedCreationParent())}><FilePlus size={14}/> New file</button><button onClick={()=>beginCreate('folder',selectedCreationParent())}><FolderPlus size={14}/> New folder</button></div>}
       <div tabIndex={0} onClick={()=>{setSelection([]);anchor.current=null;}} onContextMenu={rootMenu} onKeyDown={explorerKeys} className={`ide-project-title ${rootOver?'ide-drop-target':''}`} onDragOver={e=>{if(dragged.some(p=>p.includes('/'))){e.preventDefault();e.dataTransfer.dropEffect='move';setRootOver(true);}}} onDragLeave={()=>setRootOver(false)} onDrop={e=>{e.preventDefault();setRootOver(false);if(dragged.some(p=>p.includes('/')))void move(dragged,'');setDragged([]);}}><ProjectLanguageIcon language={project.language} size={15}/>{project.name}</div>
       {creating&&<div className="ide-new-file"><small title={createParent||project.name}>Create in: {createParent||project.name}</small><input autoFocus placeholder={creating==='folder'?'New folder name':'New file name'} value={createName} onChange={e=>setCreateName(e.target.value)} onKeyDown={e=>{if(e.key==='Enter')void submitCreate();if(e.key==='Escape')setCreating(false);}}/><button disabled={busy} onClick={()=>void submitCreate()}>Create {creating}</button></div>}
       <div className="ide-tree" ref={treeRef} onKeyDown={e=>{explorerKeys(e);if(e.key==='Escape'){setSelection([]);anchor.current=null;}if(e.key==='Delete'&&selection.length&&!busy){e.preventDefault();const rect=e.currentTarget.getBoundingClientRect();deleteSelection(selection,rect.left,rect.top,true);}}}><FolderTree projectId={project.id} onOpen={p=>void open(p)} revision={revision} onMenu={entryMenu} dragged={dragged} onDrag={p=>{setDragged(p?topPaths(selection.includes(p)?selection:[p]):[]);if(p&&!selection.includes(p))setSelection([p]);if(!p)setRootOver(false);}} selection={selection} revealParent={revealParent} onSelect={selectEntry} onMove={(p,d)=>void move(p,d)}/></div>
     </aside>}
     {explorerVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize explorer" onPointerDown={e=>startResize(e,"explorer")}/>}
-    <section className="ide-center"><div className="ide-quickbar"><button title="Toggle explorer" onClick={()=>setExplorerVisible(v=>!v)}>{explorerVisible?<PanelLeftClose size={15}/>:<PanelLeftOpen size={15}/>}</button><span>{project.name}</span><div><button onClick={()=>bottom?closeTerminal():openTerminal()}><TerminalSquare size={14}/> Terminal</button><button title="Toggle AI assistant" onClick={()=>setAssistantVisible(v=>!v)}>{assistantVisible?<PanelRightClose size={15}/>:<PanelRightOpen size={15}/>}</button></div></div>{review?<><div className="ide-tabs"><div className="ide-tab ide-tab-active"><button><FileCode size={14}/>Review: {review.path}</button><button title="Close review" onClick={()=>setReview(null)}><X size={13}/></button></div></div><div className="ide-editor-toolbar"><span>Review changes · {review.path} · Left: current file / Right: proposed</span><button onClick={()=>setReview(null)}>Close review</button></div><div className="ide-editor"><DiffEditor theme="vs-dark" language={language(review.path)} original={review.before} modified={review.after} options={{readOnly:true,renderSideBySide:true,automaticLayout:true,minimap:{enabled:false},scrollBeyondLastLine:false}}/></div></>:null}
+    <section className="ide-center">{review?<><div className="ide-tabs"><div className="ide-tab ide-tab-active"><button><FileCode size={14}/>Review: {review.path}</button><button title="Close review" onClick={()=>setReview(null)}><X size={13}/></button></div></div><div className="ide-editor-toolbar"><span>Review changes · {review.path} · Left: current file / Right: proposed</span><button onClick={()=>setReview(null)}>Close review</button></div><div className="ide-editor"><DiffEditor theme="vs-dark" language={language(review.path)} original={review.before} modified={review.after} options={{readOnly:true,renderSideBySide:true,automaticLayout:true,minimap:{enabled:false},scrollBeyondLastLine:false}}/></div></>:null}
       <div ref={splitRef} className={`ide-editor-groups ${layout.direction==='down'?'ide-editor-groups-down':''}`} style={review?{display:'none'}:undefined}>
       {layout.groups.map((group,index)=>{const selected=tabs.find(t=>t.path===group.active);return <div key={group.id} className="ide-editor-group-slot" style={{flex:layout.groups.length===1?'1':index===0?`${splitRatio} 1 0`:`${100-splitRatio} 1 0`}}>
         {index>0&&<div className="ide-editor-split-handle" role="separator" aria-label="Resize editor groups" onPointerDown={resizeSplit}/>}

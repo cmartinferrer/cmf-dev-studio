@@ -219,3 +219,22 @@
 .chat-terminal-attachment summary svg { vertical-align:middle; }
 .chat-terminal-attachment button { background:transparent; border:0; color:inherit; cursor:pointer; }
 .chat-terminal-attachment pre { max-height:180px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+/* Compact workspace navigation and persistent tool panels. */
+.studio-rail,.studio-tools{width:42px;flex:0 0 42px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:7px 0;background:#101723;border-right:1px solid #28364a;min-height:0}
+.studio-rail button,.studio-tools button{width:36px;height:36px;display:grid;place-items:center;border:0;border-radius:5px;background:transparent;color:#a5b3c9;padding:0;flex-shrink:0}
+.studio-rail button:hover,.studio-tools button:hover,.studio-tools button[aria-pressed=true],.studio-rail .rail-active{background:#292542;color:#c9baff}
+.studio-version{margin-top:auto;font-size:9px;color:#8f9fba;writing-mode:vertical-rl;transform:rotate(180deg);padding:8px 0}
+.studio-topbar{height:44px;padding:0 12px;gap:12px;background:#101723}
+.studio-brand{display:flex;align-items:center;gap:8px;color:#dce4f2;font-size:13px;font-weight:600;user-select:none}.studio-brand svg{color:#b6a4ff;flex-shrink:0}
+.content.ide-content{height:calc(100vh - 44px)}
+.studio-workspace .ide-center{min-width:0}
+.studio-workspace .studio-tools{grid-row:1;grid-column:1}
+@media(max-width:760px){.studio-workspace .studio-tools{width:100%;flex:0 0 42px;flex-direction:row;border-right:0;border-bottom:1px solid #28364a;padding:0 6px}.content.ide-content{height:auto;min-height:calc(100vh - 44px)}.studio-workspace{min-height:0}.studio-workspace .ide-center{flex:none}}
+
+
+/* Shared application frame: the header always precedes the navigation. */
+.app{display:flex;flex-direction:column;min-height:100vh}
+.studio-topbar{flex:0 0 44px;width:100%}
+.studio-body{display:flex;flex:1;min-width:0;min-height:0}
+.studio-body>.studio-rail{min-height:calc(100vh - 44px)}
