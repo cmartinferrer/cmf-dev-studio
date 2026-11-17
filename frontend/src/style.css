@@ -166,3 +166,20 @@
 
 .ide-new-file small{color:#a7b6cf;font-size:11px;overflow-wrap:anywhere}
 .resource-menu{max-height:calc(100vh - 8px);overflow-y:auto}
+
+/* Editor groups share Monaco document models, not independent file buffers. */
+.ide-editor-groups{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
+.ide-editor-groups-down{flex-direction:column}
+.ide-editor-group-slot{display:flex;min-width:0;min-height:0;overflow:hidden}
+.ide-editor-groups-down>.ide-editor-group-slot{flex-direction:column}
+.ide-editor-group{display:flex;flex:1;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.ide-editor-group:not(.ide-editor-group-focused) .ide-tab-active{border-top-color:#596273}
+.ide-editor-group .ide-editor-toolbar>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ide-editor-group .ide-editor-toolbar>div{flex-shrink:0}
+.ide-editor-split-handle{flex:0 0 5px;background:#29374b;cursor:col-resize;touch-action:none}
+.ide-editor-groups-down .ide-editor-split-handle{cursor:row-resize}
+.ide-editor-split-handle:hover{background:#967bff}
+.ide-close-group{margin-left:auto;background:none;border:0;color:#a7b6cf;padding:8px;flex-shrink:0}
+.ide-tab-menu{position:fixed;z-index:1000;display:flex;flex-direction:column;min-width:150px;padding:4px;background:#202b3c;border:1px solid #39465b;border-radius:5px;box-shadow:0 5px 15px #0006}
+.ide-tab-menu button{background:none;border:0;color:#d3ddec;text-align:left;padding:8px 12px;font-size:12px}
+.ide-tab-menu button:hover{background:#374151}
