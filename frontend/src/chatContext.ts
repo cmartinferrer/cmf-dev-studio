@@ -1,6 +1,6 @@
 export const MAX_FILES = 8;
-export function contextFiles(manual: string[], active: string | null, excluded: string[]): string[] {
-  return [...new Set([...manual, ...(active && !excluded.includes(active) ? [active] : [])])].slice(0, MAX_FILES);
+export function contextFiles(manual: string[], active: string | string[] | null, excluded: string[]): string[] {
+  return [...new Set([...manual, ...(Array.isArray(active) ? active : active ? [active] : []).filter(path => !excluded.includes(path))])].slice(0, MAX_FILES);
 }
 
 export function toggleRetryFile(selected: string[], path: string): string[] {
