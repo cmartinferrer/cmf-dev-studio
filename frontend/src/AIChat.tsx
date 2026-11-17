@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X } from 'lucide-react';
 import { prepareProposalPython, decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
 
-type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePath: string|null; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
+type Props = { projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePaths: string[]; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
 const infrastructureFailure = (item:Proposal) => /infrastructure_error|^Runner infrastructure error:/.test((item.test_output??'').split('\n')[0]);
 const canRunTests = (item:Proposal) => item.status==='ready'||(item.status==='test_failed'&&infrastructureFailure(item));
 const repairCount = (item:Proposal) => item.events?.filter(e=>e.kind==='repair_requested').length??0;
@@ -83,7 +83,7 @@ function RetryContext({item,candidates,ready,disabled,dirtyPaths,onDecision}:{it
   </div>;
 }
 
-export default function AIChat({projectId,projectName,projectKind,contextPaths,activePath,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied}:Props) {
+export default function AIChat({projectId,projectName,projectKind,contextPaths,activePaths,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied}:Props) {
   const [items,setItems] = useState<Proposal[]>([]);
   const [draft,setDraft] = useState('');
   const [busy,setBusy] = useState(false);
@@ -100,7 +100,7 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
   const bottom = useRef<HTMLDivElement|null>(null);
   useEffect(()=>{let cancelled=false;setInventoryReady(false);getRepositoryInsights(projectId).then(result=>{if(!cancelled){setInsights(result);setInventoryReady(true);}}).catch(e=>{if(!cancelled){setInsights(null);setInventoryReady(true);setError(String(e));}});return()=>{cancelled=true;};},[projectId,revision]);
   const candidates=insights?.candidates??[];
-  const eligibleActive=activePath&&candidates.some(c=>c.path===activePath)?activePath:null;
+  const eligibleActive=activePaths.filter(path=>candidates.some(c=>c.path===path));
   const manual=contextPaths.filter(path=>candidates.some(c=>c.path===path));
   const paths=contextFiles(manual,eligibleActive,excluded);
   const mention=draft.match(/(?:^|\s)@([^\s@]*)$/);
@@ -204,7 +204,7 @@ export default function AIChat({projectId,projectName,projectKind,contextPaths,a
     </div>
     {error&&<div className="chat-error chat-global-error" role="alert"><CircleAlert size={14}/>{error}<button onClick={()=>setError('')}><X size={13}/></button></div>}
     <form className="chat-composer" onSubmit={e=>void submit(e)}>
-      {paths.length>0&&<div className="chat-context-tags">{paths.map(path=><span key={path} className={`chat-context-tag ${path===eligibleActive&&!manual.includes(path)?'automatic':''}`} title={path}><FileCode2 size={13}/><span>{path.split('/').pop()}</span><button type="button" aria-label={`Remove ${path} from context`} disabled={busy} onClick={()=>onExclude(path)}><X size={12}/></button></span>)}</div>}
+      {paths.length>0&&<div className="chat-context-tags">{paths.map(path=><span key={path} className={`chat-context-tag ${eligibleActive.includes(path)&&!manual.includes(path)?'automatic':''}`} title={path}><FileCode2 size={13}/><span>{path.split('/').pop()}</span><button type="button" aria-label={`Remove ${path} from context`} disabled={busy} onClick={()=>onExclude(path)}><X size={12}/></button></span>)}</div>}
       {pickerOpen&&<div className="chat-context-picker"><input aria-label="Search project files" placeholder="Search project files…" value={search} onChange={e=>{if(mention)setDraft(old=>old.slice(0,old.length-mention[1].length)+e.target.value);else setQuery(e.target.value);}} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();if(matches[0])choose(matches[0].path);}if(e.key==='Escape'){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}}}/><div className="chat-context-results">{matches.map(c=><button type="button" key={c.path} disabled={busy||(!manual.includes(c.path)&&manual.length>=8)} onClick={()=>choose(c.path)} title={c.path}><FileCode2 size={14}/><span>{c.path}</span>{paths.includes(c.path)&&<Check size={13}/>}</button>)}{!matches.length&&<small>No eligible files found</small>}</div></div>}
       <textarea aria-label="Ask AI" placeholder="Ask AI to change your project…" rows={3} value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'&&pickerOpen){setContextOpen(false);if(mention)setDraft(old=>old.slice(0,old.length-mention[0].length));}if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(mention&&matches[0])choose(matches[0].path);else void submit(e);}}}/>
       <div className="chat-composer-bottom"><div className="chat-context-tools"><button type="button" className="chat-add-context" disabled={busy} onClick={()=>{setQuery('');setContextOpen(v=>!v);}}><Paperclip size={14}/> Add context</button></div><button type="submit" aria-label="Send to AI" disabled={!draft.trim()||busy||workingId!==null||!inventoryReady}>{busy?<LoaderCircle className="chat-spin" size={16}/>:<Send size={16}/>}</button></div>
