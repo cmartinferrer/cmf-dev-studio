@@ -56,6 +56,20 @@ MAX_FILES = 350
 MAX_BYTES = 3_000_000
 MAX_FILE = 150_000
 MAX_REPAIRS = 3
+# Existing build infrastructure is copied verbatim, never edited by agents.
+WRAPPER_FILES = frozenset(
+    {
+        "mvnw",
+        "gradlew",
+        ".mvn/wrapper/maven-wrapper.properties",
+        ".mvn/wrapper/maven-wrapper.jar",
+        ".mvn/wrapper/MavenWrapperDownloader.java",
+        ".mvn/maven.config",
+        ".mvn/jvm.config",
+        "gradle/wrapper/gradle-wrapper.properties",
+        "gradle/wrapper/gradle-wrapper.jar",
+    }
+)
 
 
 class WorkspaceError(ValueError):
@@ -127,7 +141,7 @@ def tree_digest(root: Path) -> str:
 
 
 def snapshot(source: Path, target: Path) -> dict[str, bytes]:
-    """Copy a bounded set of safe text files, without following symlinks."""
+    """Copy bounded text files and existing wrapper assets without symlinks."""
     copied: dict[str, bytes] = {}
     total = 0
     for root, dirs, files in os.walk(source, followlinks=False):
@@ -136,7 +150,7 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
             d
             for d in dirs
             if d not in EXCLUDED
-            and not d.startswith(".")
+            and (not d.startswith(".") or (base == source and d == ".mvn"))
             and not (base / d).is_symlink()
         )
         for filename in sorted(files):
@@ -149,10 +163,12 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
             ):
                 continue
             relative = file.relative_to(source).as_posix()
-            try:
-                safe_path(relative)
-            except WorkspaceError:
-                continue
+            wrapper = relative in WRAPPER_FILES
+            if not wrapper:
+                try:
+                    safe_path(relative)
+                except WorkspaceError:
+                    continue
             size = file.stat().st_size
             if size > MAX_FILE:
                 continue
@@ -161,10 +177,11 @@ def snapshot(source: Path, target: Path) -> dict[str, bytes]:
                     "Repository exceeds safe workspace snapshot limits"
                 )
             raw = file.read_bytes()
-            try:
-                raw.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
+            if not (wrapper and relative.endswith(".jar")):
+                try:
+                    raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
             dest = target / relative
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(raw)
@@ -679,7 +696,9 @@ class WorkspaceService:
                 except OSError:
                     pass
         for relative, previous in original.items():
-            dest = workspace / safe_path(relative)
+            dest = workspace / (
+                Path(relative) if relative in WRAPPER_FILES else safe_path(relative)
+            )
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(previous)
         changes = []
