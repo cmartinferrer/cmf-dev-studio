@@ -6,16 +6,19 @@ import json
 import os
 import pty
 import select
+import shlex
 import signal
 import struct
 import subprocess
 import termios
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
 from fastapi import WebSocket
 
 from cmf_dev_studio.projects.editor import safe_path
+from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
 from cmf_dev_studio.projects.models import Project
 from cmf_dev_studio.projects.python_environment import environment_info
 
@@ -41,6 +44,16 @@ def terminal_environment(project: Project) -> dict[str, str]:
     if previous:
         paths = [path for path in paths if path != str(Path(previous) / "bin")]
     env["PATH"] = os.pathsep.join(paths)
+    jdk = jdk_info(project)
+    if jdk["supported"]:
+        if current := jdk["current"]:
+            home = Path(current["path"])
+            bin_dir = str(home / "bin")
+            env["JAVA_HOME"] = str(home)
+            env["PATH"] = os.pathsep.join(
+                [bin_dir, *(path for path in paths if path != bin_dir)]
+            )
+        return env
     info = environment_info(project)
     if not info["supported"] or not info["available"]:
         return env
@@ -53,6 +66,59 @@ def terminal_environment(project: Project) -> dict[str, str]:
     if (bin_dir.parent / "pyvenv.cfg").is_file():
         env["VIRTUAL_ENV"] = str(bin_dir.parent)
     return env
+
+
+def shell_startup_command(
+    shell: str, env: dict[str, str], project: Project, startup_dir: Path
+) -> list[str]:
+    """Load user startup files, then restore the selected project environment."""
+    shell_name = Path(shell).name
+    if shell_name not in ("bash", "zsh"):
+        return [shell]
+
+    if project.language.value in ("java", "kotlin"):
+        current = jdk_info(project)["current"]
+        if not current:
+            return [shell]
+        home = current["path"]
+        bin_dir = str(Path(home) / "bin")
+        activation = f"export JAVA_HOME={shlex.quote(home)}\n"
+    else:
+        info = environment_info(project)
+        if not info["supported"] or not info["available"]:
+            return [shell]
+        bin_dir = str(Path(info["path"]).parent)
+        activation = "unset PYTHONHOME VIRTUAL_ENV_PROMPT\n"
+        if virtual_env := env.get("VIRTUAL_ENV"):
+            activation += f"export VIRTUAL_ENV={shlex.quote(virtual_env)}\n"
+        else:
+            activation += "unset VIRTUAL_ENV\n"
+    activation += f'export PATH={shlex.quote(bin_dir)}:"$PATH"\n'
+    activation += "hash -r\n"
+
+    if shell_name == "bash":
+        rc = startup_dir / "bashrc"
+        rc.write_text(
+            'if [ -r "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi\n' + activation
+        )
+        return [shell, "--rcfile", str(rc), "-i"]
+
+    # Zsh reads .zshenv before .zshrc. Preserve the original ZDOTDIR,
+    # including changes made by the user's .zshenv, for the real .zshrc.
+    original = env.get("ZDOTDIR", env.get("HOME", str(Path.home())))
+    (startup_dir / ".zshenv").write_text(
+        f"export ZDOTDIR={shlex.quote(original)}\n"
+        'if [ -r "$ZDOTDIR/.zshenv" ]; then . "$ZDOTDIR/.zshenv"; fi\n'
+        '_cmf_user_zdotdir="$ZDOTDIR"\n'
+        f"export ZDOTDIR={shlex.quote(str(startup_dir))}\n"
+    )
+    (startup_dir / ".zshrc").write_text(
+        'export ZDOTDIR="$_cmf_user_zdotdir"\n'
+        "unset _cmf_user_zdotdir\n"
+        'if [ -r "$ZDOTDIR/.zshrc" ]; then . "$ZDOTDIR/.zshrc"; fi\n' + activation
+    )
+    env["ZDOTDIR"] = str(startup_dir)
+    return [shell, "-i"]
 
 
 def python_run_command(project: Project, path: str) -> list[str]:
@@ -86,17 +152,24 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
             return
     master, slave = pty.openpty()
     process = None
+    startup = None
     try:
         shell = os.environ.get("SHELL", "/bin/sh")
         if not os.path.isfile(shell) or not os.access(shell, os.X_OK):
             shell = "/bin/sh"
+        env = terminal_environment(project)
+        if command is None:
+            startup = TemporaryDirectory(prefix="cmf-shell-")
+            args = shell_startup_command(shell, env, project, Path(startup.name))
+        else:
+            args = command
         process = subprocess.Popen(  # noqa: ASYNC220
-            command if command is not None else [shell],
+            args,
             cwd=str(project.path),
             stdin=slave,
             stdout=slave,
             stderr=slave,
-            env=terminal_environment(project),
+            env=env,
             start_new_session=True,
             close_fds=True,
         )
@@ -177,6 +250,8 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
                 if process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
                     await asyncio.to_thread(process.wait)
+        if startup is not None:
+            startup.cleanup()
         os.close(master)
         if slave >= 0:
             os.close(slave)

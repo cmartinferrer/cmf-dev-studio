@@ -27,9 +27,7 @@ def test_inspect_jdk_requires_compiler(tmp_path):
 
 def test_selection_persists_and_is_scoped(tmp_path, monkeypatch):
     home = fake_jdk(tmp_path / "jdk", "17.0.1")
-    monkeypatch.setattr(
-        "cmf_dev_studio.projects.jdk_environment.discover_jdks", list
-    )
+    monkeypatch.setattr("cmf_dev_studio.projects.jdk_environment.discover_jdks", list)
     data = tmp_path / "studio"
     manager = ProjectManager(data)
     with TestClient(create_app(data)) as client:
