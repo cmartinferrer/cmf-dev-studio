@@ -16,6 +16,8 @@ class RunnerSpec:
     name: str
     command: tuple[str, ...]
     timeout: int = 300
+    jdk_home: str | None = None
+    jdk_version: str | None = None
 
 
 class UnsupportedRunner(ValueError):
@@ -75,6 +77,13 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
             "XDG_CACHE_HOME",
         }
     }
+    if spec.jdk_home:
+        bin_dir = str(Path(spec.jdk_home) / "bin")
+        paths = env.get("PATH", os.defpath).split(os.pathsep)
+        env["JAVA_HOME"] = spec.jdk_home
+        env["PATH"] = os.pathsep.join(
+            [bin_dir, *(path for path in paths if path != bin_dir)]
+        )
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         with TemporaryDirectory(prefix="cmf-test-") as directory:

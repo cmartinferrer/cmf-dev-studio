@@ -10,6 +10,7 @@ import os
 import shutil
 import sqlite3
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from threading import Thread
@@ -24,6 +25,7 @@ from cmf_dev_studio.project_runners import (
     execute_runner,
     select_runner,
 )
+from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
 from cmf_dev_studio.projects.manager import ProjectManager
 from cmf_dev_studio.projects.models import ProjectLanguage
 from cmf_dev_studio.projects.python_environment import (
@@ -945,11 +947,28 @@ def _test_details(self: WorkspaceService, proposal_id: str) -> tuple[dict, Runne
         spec = select_runner(workspace, python)
         if spec.name == "pytest" and python and not environment["available"]:
             raise UnsupportedRunner("Selected Python interpreter is unavailable")
+        if spec.name in ("maven", "gradle"):
+            # A new AUTO project may only have a JVM manifest in the proposal.
+            jdk_project = replace(project, language=ProjectLanguage.JAVA)
+            jdk = jdk_info(jdk_project)["current"]
+            if not jdk:
+                raise UnsupportedRunner(
+                    "No available JDK. Select a valid project JDK before testing"
+                )
+            spec = replace(spec, jdk_home=jdk["path"], jdk_version=jdk["version"])
     except UnsupportedRunner as exc:
         raise WorkspaceError(str(exc)) from exc
     command = list(spec.command)
     approval = hashlib.sha256(
-        json.dumps([proposal_id, tree_digest(workspace), command]).encode()
+        json.dumps(
+            [
+                proposal_id,
+                tree_digest(workspace),
+                command,
+                spec.jdk_home,
+                spec.jdk_version,
+            ]
+        ).encode()
     ).hexdigest()
     return (
         {
