@@ -505,7 +505,49 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    class ConversationTitle(BaseModel):
+        title: str = Field(min_length=1, max_length=120)
+
+    @app.get("/api/projects/{project_id}/conversations")
+    def list_conversations(project_id: str) -> list[dict]:
+        try:
+            return workspaces.conversations(project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/conversations")
+    def create_conversation(project_id: str) -> dict:
+        try:
+            return workspaces.create_conversation(project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.patch("/api/projects/{project_id}/conversations/{cid}")
+    def rename_conversation(
+        project_id: str, cid: str, request: ConversationTitle
+    ) -> dict:
+        try:
+            return workspaces.rename_conversation(project_id, cid, request.title)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}/conversations/{cid}")
+    def remove_conversation(
+        project_id: str, cid: str, clear: bool = False, confirmed: bool = False
+    ) -> dict:
+        if not confirmed:
+            raise HTTPException(status_code=400, detail="Confirmation required")
+        try:
+            return workspaces.remove_conversation(project_id, cid, clear)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     class ProposalRequest(BaseModel):
+        conversation_id: str | None = None
         terminal_context: list[TerminalContext] = Field(
             default_factory=list, max_length=3
         )
@@ -526,6 +568,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                 request.context_digest,
                 [item.model_dump() for item in request.terminal_context],
                 request.assistant_language,
+                request.conversation_id,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -533,10 +576,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/proposals")
-    def list_proposals(project_id: str) -> list[dict]:
+    def list_proposals(
+        project_id: str, conversation_id: str | None = None
+    ) -> list[dict]:
         if manager.get(project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        return workspaces.list(project_id)
+        try:
+            return workspaces.list(project_id, conversation_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/proposals/{proposal_id}")
     def get_proposal(proposal_id: str) -> dict:

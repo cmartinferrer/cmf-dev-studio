@@ -1,0 +1,2 @@
+export function chatDay(value:string):string {const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleDateString(undefined,{year:'numeric',month:'long',day:'numeric'});}
+export function chatTime(value:string,includeSeconds=false):string {const date=new Date(value);return Number.isNaN(date.getTime())?'':date.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',...(includeSeconds?{second:'2-digit' as const}:{}),hourCycle:'h23'});}
