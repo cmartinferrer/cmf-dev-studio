@@ -10,9 +10,14 @@ import signal
 import struct
 import subprocess
 import termios
+from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import WebSocket
+
+from cmf_dev_studio.projects.editor import safe_path
+from cmf_dev_studio.projects.models import Project
+from cmf_dev_studio.projects.python_environment import environment_info
 
 
 def allowed_local_origin(ws: WebSocket) -> bool:
@@ -26,6 +31,41 @@ def allowed_local_origin(ws: WebSocket) -> bool:
     )
 
 
+def terminal_environment(project: Project) -> dict[str, str]:
+    """Prepare a shell environment without changing the backend process."""
+    env = {**os.environ, "TERM": "xterm-256color"}
+    previous = env.pop("VIRTUAL_ENV", None)
+    env.pop("VIRTUAL_ENV_PROMPT", None)
+    env.pop("PYTHONHOME", None)
+    paths = env.get("PATH", os.defpath).split(os.pathsep)
+    if previous:
+        paths = [path for path in paths if path != str(Path(previous) / "bin")]
+    env["PATH"] = os.pathsep.join(paths)
+    info = environment_info(project)
+    if not info["supported"] or not info["available"]:
+        return env
+
+    interpreter = Path(info["path"])
+    bin_dir = interpreter.parent
+    env["PATH"] = os.pathsep.join(
+        [str(bin_dir), *(path for path in paths if path != str(bin_dir))]
+    )
+    if (bin_dir.parent / "pyvenv.cfg").is_file():
+        env["VIRTUAL_ENV"] = str(bin_dir.parent)
+    return env
+
+
+def python_run_command(project: Project, path: str) -> list[str]:
+    """Resolve a saved Python file and its configured interpreter without a shell."""
+    target = safe_path(project.path, path)
+    if target.suffix.lower() != ".py":
+        raise ValueError("Select a Python file to run")
+    info = environment_info(project)
+    if not info["supported"] or not info["available"]:
+        raise ValueError("Set up Python in the status bar before running this file.")
+    return [info["path"], "-u", str(target)]
+
+
 async def terminal_socket(ws: WebSocket, manager) -> None:
     if not allowed_local_origin(ws) or os.name != "posix":
         await ws.close(code=1008)
@@ -35,6 +75,15 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
         await ws.close(code=1008)
         return
     await ws.accept()
+    run_path = ws.query_params.get("run")
+    command = None
+    if run_path is not None:
+        try:
+            command = python_run_command(project, run_path)
+        except (ValueError, OSError) as exc:
+            await ws.send_text(f"\r\n{exc}\r\n")
+            await ws.close()
+            return
     master, slave = pty.openpty()
     process = None
     try:
@@ -42,23 +91,27 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
         if not os.path.isfile(shell) or not os.access(shell, os.X_OK):
             shell = "/bin/sh"
         process = subprocess.Popen(  # noqa: ASYNC220
-            [shell],
+            command if command is not None else [shell],
             cwd=str(project.path),
             stdin=slave,
             stdout=slave,
             stderr=slave,
-            env={**os.environ, "TERM": "xterm-256color"},
+            env=terminal_environment(project),
             start_new_session=True,
             close_fds=True,
         )
         os.close(slave)
         slave = -1
+        if command is not None:
+            await ws.send_text(f"Running Python file: {run_path!r}\r\n\r\n")
 
         async def output_loop():
-            while process.poll() is None:
+            while True:
                 ready, _, _ = await asyncio.to_thread(
                     select.select, [master], [], [], 0.15
                 )
+                if not ready and process.poll() is not None:
+                    break
                 if ready:
                     try:
                         data = os.read(master, 8192)
@@ -67,10 +120,11 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
                     if not data:
                         break
                     await ws.send_bytes(data)
-
-        reader = asyncio.create_task(output_loop())
-        try:
             while process.poll() is None:
+                await asyncio.sleep(0.05)
+
+        async def receive_loop():
+            while True:
                 message = await ws.receive()
                 if message["type"] == "websocket.disconnect":
                     break
@@ -90,11 +144,30 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
                             termios.TIOCSWINSZ,
                             struct.pack("HHHH", rows, cols, 0, 0),
                         )
+
+        reader = asyncio.create_task(output_loop())
+        receiver = asyncio.create_task(receive_loop())
+        try:
+            done, _ = await asyncio.wait(
+                (reader, receiver), return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                task.result()
+            if reader in done and receiver not in done:
+                if command is not None and process.poll() is not None:
+                    await ws.send_text(
+                        f"\r\nProcess exited with code {process.returncode}\r\n"
+                    )
+                await ws.close()
         except (OSError, ValueError, KeyError, RuntimeError):
             pass
         finally:
-            reader.cancel()
-            await asyncio.gather(reader, return_exceptions=True)
+            for task in (reader, receiver):
+                task.cancel()
+            await asyncio.gather(reader, receiver, return_exceptions=True)
+    except OSError as exc:
+        await ws.send_text(f"\r\nCould not start terminal: {exc}\r\n")
+        await ws.close()
     finally:
         if process is not None and process.poll() is None:
             try:

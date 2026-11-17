@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronUp, FolderOpen } from 'lucide-react';
 import { projectLanguageLabels, type Project, type ProjectLanguage } from './api';
 import ProjectLanguageIcon from './ProjectLanguageIcon';
+import PythonEnvironmentControl from './PythonEnvironmentControl';
 
 /** Workspace metadata and language controls, independent of the editor panels. */
-export default function WorkspaceStatusBar({ project, busy, onLanguageChange }: {
+export default function WorkspaceStatusBar({ project, busy, onLanguageChange, revision }: {
   project: Project;
   busy: boolean;
+  revision: number;
   onLanguageChange: (language: ProjectLanguage) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -26,6 +28,7 @@ export default function WorkspaceStatusBar({ project, busy, onLanguageChange }: 
   return <footer className="workspace-status-bar" aria-label="Workspace status">
     <div className="workspace-status-left"><FolderOpen size={13}/><span>{project.kind === 'existing' ? 'Registered repository' : 'Managed workspace'}</span></div>
     <div className="workspace-status-right">
+      <PythonEnvironmentControl project={project} revision={revision}/>
       <div className="workspace-language-control" ref={root} onBlur={event=>{if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);}} onKeyDown={event=>{
         if (event.key === 'Escape' && open) { event.preventDefault(); close(); }
         if (open && ['ArrowDown','ArrowUp','Home','End'].includes(event.key)) {

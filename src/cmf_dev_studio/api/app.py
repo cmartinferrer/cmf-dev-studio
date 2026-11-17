@@ -1,6 +1,7 @@
 """Local REST API for projects, editor operations and AI proposals."""
 
 import os
+import subprocess
 from importlib.metadata import version
 from pathlib import Path
 from typing import Literal
@@ -28,6 +29,11 @@ from cmf_dev_studio.projects.editor import (
 )
 from cmf_dev_studio.projects.explorer import ExplorerError, list_directory, read_file
 from cmf_dev_studio.projects.intelligence import analyze_repository, prepare_context
+from cmf_dev_studio.projects.python_environment import (
+    create_environment,
+    environment_info,
+    select_interpreter,
+)
 from cmf_dev_studio.projects.search import search_files
 from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 
@@ -137,6 +143,51 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
+
+    class PythonEnvironmentRequest(BaseModel):
+        action: Literal["create", "select", "reset"]
+        path: str | None = None
+        confirmed: StrictBool = False
+
+    @app.get("/api/projects/{project_id}/python-environment")
+    def get_python_environment(project_id: str) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return environment_info(project)
+
+    @app.post("/api/projects/{project_id}/python-environment")
+    def update_python_environment(
+        project_id: str, request: PythonEnvironmentRequest
+    ) -> dict:
+        project = manager.get(project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not environment_info(project)["supported"]:
+            raise HTTPException(
+                status_code=422,
+                detail="Not a Python project; select Python as project language first",
+            )
+        if not request.confirmed:
+            raise HTTPException(
+                status_code=400, detail="Explicit confirmation required"
+            )
+        try:
+            if request.action == "create":
+                create_environment(project)
+                project = manager.update_python_interpreter(project_id, None, None)
+            elif request.action == "select":
+                path, python_version = select_interpreter(request.path or "")
+                project = manager.update_python_interpreter(
+                    project_id, path, python_version
+                )
+            else:
+                project = manager.update_python_interpreter(project_id, None, None)
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        return environment_info(project)
 
     class RenameProjectRequest(BaseModel):
         name: str = Field(min_length=1, max_length=80)
@@ -534,6 +585,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    class PreparePythonRequest(BaseModel):
+        confirmed: StrictBool
+
+    @app.post("/api/proposals/{proposal_id}/prepare-python")
+    def prepare_python(proposal_id: str, request: PreparePythonRequest) -> dict:
+        try:
+            return workspaces.prepare_python(proposal_id, request.confirmed)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return app

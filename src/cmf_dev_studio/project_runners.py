@@ -6,7 +6,6 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,7 +22,7 @@ class UnsupportedRunner(ValueError):
     pass
 
 
-def select_runner(workspace: Path) -> RunnerSpec:
+def select_runner(workspace: Path, python: str | None = None) -> RunnerSpec:
     paths = {
         p.relative_to(workspace).as_posix() for p in workspace.rglob("*") if p.is_file()
     }
@@ -42,12 +41,15 @@ def select_runner(workspace: Path) -> RunnerSpec:
             "gradle", ("gradle", "test", "--console=plain", "--no-daemon")
         )
     if any(p.endswith(".py") for p in paths):
-        command = (
-            ("uv", "run", "--with", "pytest", "pytest", "-q")
-            if "pyproject.toml" in paths
-            else (sys.executable, "-m", "pytest", "-q")
-        )
-        return RunnerSpec("pytest", command)
+        command = ["uv", "run", "--isolated", "--no-python-downloads"]
+        if python:
+            command.extend(("--python", python))
+        if "pyproject.toml" not in paths:
+            command.append("--no-project")
+        if "requirements.txt" in paths:
+            command.extend(("--with-requirements", "requirements.txt"))
+        command.extend(("--with", "pytest", "--", "python", "-m", "pytest", "-q"))
+        return RunnerSpec("pytest", tuple(command))
     raise UnsupportedRunner(
         "No supported test runner (Python/pytest, Java/Maven or Java/Kotlin/Gradle)"
     )
@@ -104,7 +106,15 @@ def execute_runner(workspace: Path, spec: RunnerSpec) -> tuple[bool, str]:
                 code = process.returncode
         classification = (
             "infrastructure_error"
-            if code in (125, 126, 127) or (spec.name == "pytest" and code in (3, 4))
+            if code in (125, 126, 127)
+            or (spec.name == "pytest" and code in (3, 4))
+            or (
+                spec.name == "pytest"
+                and code == 2
+                and any(
+                    line.startswith(("error:", "  ×")) for line in output.splitlines()
+                )
+            )
             else "test_result"
         )
         return (
