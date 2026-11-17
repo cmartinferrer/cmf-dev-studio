@@ -1,5 +1,7 @@
 """HTTP contract tests; no Docker, Gemini, or running web server required."""
 
+from importlib.metadata import version
+
 from fastapi.testclient import TestClient
 
 from cmf_dev_studio.api.app import create_app
@@ -137,3 +139,10 @@ def test_update_project_language_http_contract(tmp_path):
             **project,
             "language": "kotlin",
         }
+
+
+def test_api_version_matches_package_version(tmp_path):
+    """Ensure the API version matches the installed package version."""
+    app = create_app(tmp_path / "studio")
+
+    assert app.version == version("cmf-dev-studio")
