@@ -41,15 +41,13 @@ def test_prepare_jvm(tmp_path, language, manifest, wrapper, tool):
     assert run.call_args.kwargs == {"in_place": True}
 
 
-def test_existing_project_not_prepared(tmp_path):
-    """Do not offer real builds for registered external repositories."""
+def test_existing_project_can_be_prepared(tmp_path):
+    """Offer the same preparation for registered repositories."""
     project = Project(
         "id", "demo", tmp_path, ProjectKind.EXISTING, "", "", ProjectLanguage.JAVA
     )
     (tmp_path / "pom.xml").touch()
-    assert preparation_spec(project) is None
-    with pytest.raises(ValueError, match="managed"):
-        prepare_jvm(project)
+    assert preparation_spec(project) is not None
 
 
 def test_runner_in_place(tmp_path):

@@ -166,3 +166,21 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
     assert result["approved_paths"] == ["Hola.java"]
     assert source.read_text() == "asdf"
     assert any(e["kind"] == "assistant_response" for e in result["events"])
+
+
+def test_permission_question_is_normalized_and_grant_is_not_repeated():
+    """A model cannot turn exploration authorization into a conversational loop."""
+    question = "¿Autorizas permisos para explorar el proyecto?"
+    model = Model([("question", "", question)])
+    agent = Investigator(model, {}, {}, False, lambda *_: None)
+    assert agent.run("create", [], "Spanish", [])[0] == "permission"
+    model = Model(
+        [
+            ("permission", "", question),
+            ("question", "", question),
+            ("patch", "", "Create a file"),
+        ]
+    )
+    agent = Investigator(model, {}, {}, True, lambda *_: None)
+    assert agent.run("create", [], "Spanish", [])[0] == "patch"
+    assert "Already authorized" in model.prompts[-1]

@@ -53,12 +53,12 @@ def test_apply_managed(tmp_path):
     assert (project.path / "main.py").read_text() == "print(2)\n"
 
 
-def test_apply_existing_requires_authorization(tmp_path):
+def test_apply_existing_requires_approval(tmp_path):
     service, project, pid = proposal(tmp_path, True)
-    with pytest.raises(WorkspaceError, match="explicit write authorization"):
-        service.apply(pid, True)
+    with pytest.raises(WorkspaceError, match="Explicit approval"):
+        service.apply(pid, False)
     assert not (project.path / "main.py").exists()
-    assert service.apply(pid, True, True)["status"] == "applied"
+    assert service.apply(pid, True)["status"] == "applied"
 
 
 def test_apply_conflict(tmp_path):

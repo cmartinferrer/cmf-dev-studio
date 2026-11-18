@@ -1435,10 +1435,6 @@ def _apply_proposal(
             raise WorkspaceError("Project no longer exists")
         if approved is not True:
             raise WorkspaceError("Explicit approval is required to apply changes")
-        if project.kind.value == "existing" and not allow_existing:
-            raise WorkspaceError(
-                "Existing projects require explicit write authorization"
-            )
         root = project.path
         workspace = self.root / proposal_id
         changes = row["changes"]

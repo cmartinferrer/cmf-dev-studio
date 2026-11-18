@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle, ChevronUp, TerminalSquare } from 'lucide-react';
-import { getPythonEnvironment, updatePythonEnvironment, type Project, type PythonEnvironment } from './api';
+import { getProject, getPythonEnvironment, updatePythonEnvironment, type Project, type PythonEnvironment } from './api';
 
-export default function PythonEnvironmentControl({ project, revision }: { project: Project; revision: number }) {
+export default function PythonEnvironmentControl({ project, revision, onProjectUpdated }: { project: Project; revision: number; onProjectUpdated: (project: Project) => void }) {
   const [info, setInfo] = useState<PythonEnvironment | null>(null);
   const [open, setOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -29,6 +29,7 @@ export default function PythonEnvironmentControl({ project, revision }: { projec
     setBusy(true); setError(''); setPending(null);
     try {
       setInfo(await updatePythonEnvironment(project.id, action, action === 'select' ? path.trim() : undefined));
+      onProjectUpdated(await getProject(project.id));
       setAdvanced(false); setPath('');
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }

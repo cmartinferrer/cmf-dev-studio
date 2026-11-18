@@ -114,3 +114,26 @@ def test_environment_http_contract(tmp_path):
             == "none"
         )
         assert client.get("/api/projects/missing/python-environment").status_code == 404
+
+
+def test_auto_language_updates_when_python_is_selected(tmp_path):
+    """An explicitly configured Python environment updates project metadata."""
+    from cmf_dev_studio.api.app import create_app
+
+    root = tmp_path / "external"
+    root.mkdir()
+    (root / "main.py").write_text("print('hello')")
+    with TestClient(create_app(tmp_path / "studio")) as client:
+        project = client.post(
+            "/api/projects/register",
+            json={"path": str(root), "name": "ignored", "description": "ignored"},
+        ).json()
+        assert project["name"] == "external"
+        assert project["description"] == ""
+        url = f"/api/projects/{project['id']}"
+        result = client.post(
+            url + "/python-environment",
+            json={"action": "select", "path": sys.executable, "confirmed": True},
+        )
+        assert result.status_code == 200
+        assert client.get(url).json()["language"] == "python"

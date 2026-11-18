@@ -111,12 +111,19 @@ class ProjectManager:
         name: str,
         description: str = "",
         language: ProjectLanguage = ProjectLanguage.AUTO,
+        location: str | Path | None = None,
     ) -> Project:
         """Create an empty managed workspace, never replacing an existing folder."""
         name = self._validate_name(name)
         # IDs avoid collisions even for projects with identical display names.
         project_id = uuid4().hex
-        path = self.managed_dir / project_id
+        path = (
+            self.managed_dir / project_id
+            if location is None
+            else Path(location).expanduser().resolve(strict=True) / name
+        )
+        if location is not None:
+            self._validate_root(path)
         path.mkdir(exist_ok=False)
         try:
             return self._insert(
@@ -134,10 +141,8 @@ class ProjectManager:
         if not supplied.is_dir():
             raise ValueError(f"Existing project directory not found: {supplied}")
         resolved = supplied.resolve(strict=True)
-        if resolved == self.data_dir or self.data_dir in resolved.parents:
-            raise ValueError("Cannot register the studio's own data directory")
-        name = self._validate_name(name if name is not None else resolved.name)
-        return self._insert(name, resolved, ProjectKind.EXISTING, description)
+        self._validate_root(resolved)
+        return self._insert(resolved.name, resolved, ProjectKind.EXISTING, "")
 
     def get(self, project_id: str) -> Project | None:
         with self._connect() as db:
@@ -192,21 +197,46 @@ class ProjectManager:
             db.execute("UPDATE projects SET name=? WHERE id=?", (name, project_id))
         return self.get(project_id)
 
-    def delete(self, project_id: str) -> bool:
-        """Unregister external projects; remove only owned managed directories."""
+    def _validate_root(self, path: Path) -> None:
+        if path == Path.home().resolve() or path == Path(path.anchor):
+            raise ValueError("Choose a dedicated project directory")
+        if (
+            path == self.data_dir
+            or path in self.data_dir.parents
+            or self.data_dir in path.parents
+        ) and (path.parent != self.managed_dir or path.is_symlink()):
+            raise ValueError("Cannot access the studio's own data directory")
+        for project in self.list_projects():
+            if path == project.path:
+                raise ValueError("Project path is already registered")
+            if path in project.path.parents or project.path in path.parents:
+                raise ValueError("Project directories must not overlap")
+
+    def delete(self, project_id: str, *, from_disk: bool = False) -> bool:
+        """Remove registry metadata, optionally deleting the project directory."""
         project = self.get(project_id)
         if project is None:
             return False
-        if project.kind == ProjectKind.MANAGED:
-            root = self.managed_dir.resolve()
+        if from_disk:
             path = project.path
             if (
-                self.managed_dir.is_symlink()
-                or path.parent != root
-                or path.is_symlink()
+                path.is_symlink()
                 or path.resolve() != path
+                or path == Path.home().resolve()
+                or path == Path(path.anchor)
             ):
-                raise ValueError("Unsafe managed workspace path")
+                raise ValueError("Unsafe project directory")
+            if (
+                path == self.data_dir
+                or path in self.data_dir.parents
+                or (self.data_dir in path.parents and path.parent != self.managed_dir)
+            ):
+                raise ValueError("Cannot access the studio's own data directory")
+            for other in self.list_projects():
+                if other.id != project_id and (
+                    path in other.path.parents or other.path in path.parents
+                ):
+                    raise ValueError("Project directories overlap")
             if path.exists():
                 shutil.rmtree(path)
         with self._connect() as db:

@@ -4,9 +4,10 @@ import os
 import subprocess
 from importlib.metadata import version
 from pathlib import Path
+from threading import RLock
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, StrictBool
 
 from cmf_dev_studio.api.terminal import terminal_socket
@@ -54,6 +55,7 @@ class ProjectResponse(BaseModel):
 
 class CreateProjectRequest(BaseModel):
     language: ProjectLanguage = ProjectLanguage.AUTO
+    location: str | None = None
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=2000)
 
@@ -89,9 +91,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     workspaces = WorkspaceService(manager)
     app = FastAPI(title="CMF Dev Studio API", version=version("cmf-dev-studio"))
 
+    active_terminals: dict[str, int] = {}
+    project_lock = RLock()
+
     @app.websocket("/api/projects/{project_id}/terminal")
     async def project_terminal(websocket: WebSocket, project_id: str) -> None:
-        await terminal_socket(websocket, manager)
+        with project_lock:
+            active_terminals[project_id] = active_terminals.get(project_id, 0) + 1
+        try:
+            await terminal_socket(websocket, manager)
+        finally:
+            with project_lock:
+                active_terminals[project_id] -= 1
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -110,10 +121,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         try:
             return _response(
                 manager.create(
-                    request.name, request.description, language=request.language
+                    request.name,
+                    request.description,
+                    language=request.language,
+                    location=request.location,
                 )
             )
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post(
@@ -128,7 +142,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     request.path, request.name, request.description
                 )
             )
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}", response_model=ProjectResponse)
@@ -190,6 +204,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        if (
+            project.language == ProjectLanguage.AUTO
+            and environment_info(project)["available"]
+        ):
+            project = manager.update_language(project_id, ProjectLanguage.PYTHON)
         return environment_info(project)
 
     class JdkRequest(BaseModel):
@@ -232,30 +251,92 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     ) -> ProjectResponse:
         try:
             project = manager.rename(project_id, request.name)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
 
-    @app.delete("/api/projects/{project_id}")
-    def delete_project(project_id: str, confirmed: bool = False) -> dict:
-        if not confirmed:
-            raise HTTPException(status_code=400, detail="Confirmation required")
-        if any(
-            p["status"] in ("queued", "running", "generating", "repairing")
-            for p in workspaces.list(project_id)
-        ):
-            raise HTTPException(
-                status_code=409, detail="Wait for the active AI operation"
-            )
+    opened_projects: dict[str, set[str]] = {}
+    presence_connections: dict[tuple[str, str], int] = {}
+
+    @app.post("/api/projects/{project_id}/open")
+    def open_project(project_id: str, session: str = "legacy") -> dict:
+        with project_lock:
+            project = manager.get(project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            if (
+                project.language == ProjectLanguage.AUTO
+                and environment_info(project)["available"]
+            ):
+                manager.update_language(project_id, ProjectLanguage.PYTHON)
+            opened_projects.setdefault(project_id, set()).add(session)
+        return {"opened": True}
+
+    @app.post("/api/projects/{project_id}/close")
+    def close_project(project_id: str, session: str = "legacy") -> dict:
+        with project_lock:
+            opened_projects.get(project_id, set()).discard(session)
+        return {"closed": True}
+
+    @app.websocket("/api/projects/{project_id}/presence")
+    async def project_presence(websocket: WebSocket, project_id: str) -> None:
+        session = websocket.query_params.get("session", "")
+        if not session:
+            await websocket.close(code=1008)
+            return
+        with project_lock:
+            exists = manager.get(project_id) is not None
+            if exists:
+                opened_projects.setdefault(project_id, set()).add(session)
+                key = (project_id, session)
+                presence_connections[key] = presence_connections.get(key, 0) + 1
+        if not exists:
+            await websocket.close(code=1008)
+            return
         try:
-            deleted = manager.delete(project_id)
-        except (ValueError, OSError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Project not found")
-        return {"deleted": True}
+            await websocket.accept()
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            with project_lock:
+                count = presence_connections[key] - 1
+                if count:
+                    presence_connections[key] = count
+                else:
+                    presence_connections.pop(key)
+                    opened_projects.get(project_id, set()).discard(session)
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(
+        project_id: str, confirmed: bool = False, from_disk: bool = False
+    ) -> dict:
+        with project_lock:
+            if not confirmed:
+                raise HTTPException(status_code=400, detail="Confirmation required")
+            if (
+                opened_projects.get(project_id)
+                or any(key[0] == project_id for key in presence_connections)
+                or active_terminals.get(project_id, 0)
+            ):
+                raise HTTPException(status_code=409, detail="Close the project first")
+            if any(
+                p["status"] in ("queued", "running", "generating", "repairing")
+                for p in workspaces.list(project_id)
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Wait for the active AI operation"
+                )
+            try:
+                deleted = manager.delete(project_id, from_disk=from_disk)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return {"deleted": True}
 
     @app.get("/api/local/directories")
     def local_directories(path: str = "") -> dict:
@@ -310,11 +391,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         project = manager.get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        if project.read_only and not authorize_existing:
-            raise HTTPException(
-                status_code=403,
-                detail="Explicit authorization required for existing projects",
-            )
         return project
 
     @app.get("/api/projects/{project_id}/editor/file")
@@ -364,7 +440,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         project = editable_project(project_id, request.authorize_existing)
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (
+            if project.kind.value == "existing" and (
                 target == manager.data_dir
                 or target in manager.data_dir.parents
                 or manager.data_dir in target.parents
@@ -392,7 +468,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def editor_create_directory(project_id: str, request: DirectoryRequest) -> dict:
         project = editable_project(project_id, request.authorize_existing)
         try:
-            if project.read_only:
+            if project.kind.value == "existing":
                 protect_studio(
                     safe_path(project.path, request.path, allow_missing=True)
                 )
@@ -408,7 +484,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         try:
             source = entry_path(project.path, request.path)
             destination = directory_path(project.path, request.parent) / source.name
-            if project.read_only:
+            if project.kind.value == "existing":
                 protect_studio(source)
                 protect_studio(destination)
             if source == destination:
@@ -429,7 +505,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (
+            if project.kind.value == "existing" and (
                 target == manager.data_dir
                 or target in manager.data_dir.parents
                 or manager.data_dir in target.parents
@@ -457,7 +533,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio if project.read_only else lambda target: None,
+                    protect_studio
+                    if project.kind.value == "existing"
+                    else lambda target: None,
                 ),
             )
         except EditConflict as exc:
@@ -477,7 +555,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio if project.read_only else lambda target: None,
+                    protect_studio
+                    if project.kind.value == "existing"
+                    else lambda target: None,
                 ),
             )
         except EditConflict as exc:

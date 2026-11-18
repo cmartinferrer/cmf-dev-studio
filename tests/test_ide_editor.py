@@ -65,10 +65,7 @@ def test_existing_requires_authorization_and_symlink_block(tmp_path):
     url = f"/api/projects/{pid}/editor/file"
     rev = client.get(url, params={"path": "main.py"}).json()["sha256"]
     payload = {"path": "main.py", "content": "new", "expected_sha256": rev}
-    assert client.put(url, json=payload).status_code == 403
-    assert (
-        client.put(url, json={**payload, "authorize_existing": True}).status_code == 200
-    )
+    assert client.put(url, json=payload).status_code == 200
     assert (root / "main.py").read_text() == "new"
     assert (
         client.put(

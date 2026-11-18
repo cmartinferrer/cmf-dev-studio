@@ -15,8 +15,8 @@ export async function request<T>(endpoint: string, options?: RequestInit): Promi
 }
 export const updateProjectLanguage = (projectId: string, language: ProjectLanguage) => request<Project>(`/projects/${encodeURIComponent(projectId)}/language`, { method: 'PATCH', body: JSON.stringify({ language }) });
 export const listProjects = () => request<Project[]>('/projects');
-export const createProject = (name: string, description: string, language: ProjectLanguage) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description, language }) });
-export const registerProject = (path: string, name: string, description: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path, name: name || null, description }) });
+export const createProject = (name: string, description: string, language: ProjectLanguage, location: string) => request<Project>('/projects', { method: 'POST', body: JSON.stringify({ name, description, language, location }) });
+export const registerProject = (path: string) => request<Project>('/projects/register', { method: 'POST', body: JSON.stringify({ path }) });
 
 
 export type FileEntry = { name: string; path: string; kind: 'file' | 'directory' };
@@ -55,8 +55,8 @@ export const applyProposal = (proposalId: string, allowExisting: boolean) => req
 
 export type EditableFile = FilePreview & { sha256: string };
 export const openEditableFile = (projectId: string, path: string) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file?path=${encodeURIComponent(path)}`);
-export const saveEditableFile = (projectId: string, path: string, content: string, expected_sha256: string | null, create: boolean, authorize_existing: boolean) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'PUT',body:JSON.stringify({path,content,expected_sha256,create,authorize_existing})});
-export const deleteEditableFile = (projectId: string, path: string, expected_sha256: string, authorize_existing: boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'DELETE',body:JSON.stringify({path,expected_sha256,authorize_existing})});
+export const saveEditableFile = (projectId: string, path: string, content: string, expected_sha256: string | null, create: boolean) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'PUT',body:JSON.stringify({path,content,expected_sha256,create})});
+export const deleteEditableFile = (projectId: string, path: string, expected_sha256: string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(projectId)}/editor/file`, {method:'DELETE',body:JSON.stringify({path,expected_sha256})});
 
 export const previewProposalFile = (proposalId: string, path: string) => request<{path:string;before:string;after:string}>(`/proposals/${encodeURIComponent(proposalId)}/preview?path=${encodeURIComponent(path)}`);
 
@@ -65,16 +65,16 @@ export const deferProposal = (id:string, action:"tests"|"apply") => request<Prop
 export const repairProposal = (id:string) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/repair`, {method:"POST"});
 
 export const renameProject = (id:string, name:string) => request<Project>(`/projects/${encodeURIComponent(id)}/name`, {method:'PATCH',body:JSON.stringify({name})});
-export const removeProject = (id:string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}?confirmed=true`, {method:'DELETE'});
-export const renameEntry = (id:string,path:string,name:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'PATCH',body:JSON.stringify({path,name,authorize_existing})});
-export const removeEntry = (id:string,path:string,authorize_existing:boolean) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,authorize_existing,confirmed:true})});
+export const removeProject = (id:string, fromDisk=false) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}?confirmed=true&from_disk=${fromDisk}`, {method:'DELETE'});
+export const renameEntry = (id:string,path:string,name:string) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'PATCH',body:JSON.stringify({path,name})});
+export const removeEntry = (id:string,path:string) => request<{deleted:boolean}>(`/projects/${encodeURIComponent(id)}/editor/entry`, {method:'DELETE',body:JSON.stringify({path,confirmed:true})});
 
 export const decideGeneration = (id:string, retry:boolean, contextPaths?:string[], contextDigest?:string|null) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/generation-decision`, {method:"POST",body:JSON.stringify({retry,context_paths:contextPaths,context_digest:contextDigest})});
-export const createDirectory = (id:string,path:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/directory`, {method:'POST',body:JSON.stringify({path,authorize_existing})});
-export const moveEntry = (id:string,path:string,parent:string,authorize_existing:boolean) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/move`, {method:'PATCH',body:JSON.stringify({path,parent,authorize_existing})});
-export const batchEntries = (id:string,paths:string[],parent:string|null,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/batch`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing,confirmed:parent===null})});
+export const createDirectory = (id:string,path:string) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/directory`, {method:'POST',body:JSON.stringify({path})});
+export const moveEntry = (id:string,path:string,parent:string) => request<{path:string}>(`/projects/${encodeURIComponent(id)}/editor/move`, {method:'PATCH',body:JSON.stringify({path,parent})});
+export const batchEntries = (id:string,paths:string[],parent:string|null) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/batch`, {method:'POST',body:JSON.stringify({paths,parent,confirmed:parent===null})});
 
-export const copyEntries = (id:string,paths:string[],parent:string,authorize_existing:boolean) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/copy`, {method:'POST',body:JSON.stringify({paths,parent,authorize_existing})});
+export const copyEntries = (id:string,paths:string[],parent:string) => request<{completed:{source:string;path:string}[];error:string|null}>(`/projects/${encodeURIComponent(id)}/editor/copy`, {method:'POST',body:JSON.stringify({paths,parent})});
 
 export type PythonEnvironment = { supported: boolean; path: string | null; version: string | null; source: 'selected' | 'detected' | 'none'; available: boolean; venv_exists: boolean; uv_available: boolean };
 export const getPythonEnvironment = (id: string) => request<PythonEnvironment>(`/projects/${encodeURIComponent(id)}/python-environment`);
@@ -88,3 +88,8 @@ export const getJdk = (id: string) => request<JdkEnvironment>(`/projects/${encod
 export const updateJdk = (id: string, path: string | null) => request<JdkEnvironment>(`/projects/${encodeURIComponent(id)}/jdk`, { method: 'POST', body: JSON.stringify({ path }) });
 
 export const decideExploration = (id:string, allow:boolean) => request<Proposal>(`/proposals/${encodeURIComponent(id)}/exploration-decision`, {method:"POST",body:JSON.stringify({allow})});
+
+const workspaceSession = crypto.randomUUID();
+export const projectPresence = (id:string) => new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/projects/${encodeURIComponent(id)}/presence?session=${workspaceSession}`);
+export const setProjectOpen = (id:string, open:boolean) => request(`/projects/${encodeURIComponent(id)}/${open?"open":"close"}?session=${workspaceSession}`, {method:"POST", keepalive: !open});
+export const getProject = (id:string) => request<Project>(`/projects/${encodeURIComponent(id)}`);

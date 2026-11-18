@@ -33,5 +33,5 @@ class Project:
 
     @property
     def read_only(self) -> bool:
-        """Existing repositories are registered but never edited by this layer."""
-        return self.kind is ProjectKind.EXISTING
+        """All registered projects support editing."""
+        return False

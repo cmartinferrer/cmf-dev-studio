@@ -194,7 +194,6 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(
         ({}, 422),
         ({"approved": False, "allow_existing": True}, 409),
         ({"approved": "true", "allow_existing": True}, 422),
-        ({"approved": True}, 409),
     ]:
         assert (
             client.post(f"/api/proposals/{proposal_id}/apply", json=body).status_code

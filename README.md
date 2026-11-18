@@ -213,7 +213,7 @@ Open [http\://127.0.0.1:5173](http\://127.0.0.1:5173). The frontend proxies API 
 3. Open the assistant and describe a concrete development task. Review the suggested active-file context, remove unwanted files or add context manually, then authorize eligible contents before sending them to the AI provider.
 4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution.
 5. Review the test output. If verification fails, inspect the error and request a repair when appropriate. A changed proposal requires fresh execution approval. Generation retries can reuse the original context or use an explicitly approved replacement.
-6. Accept verified changes explicitly using the inline **Accept changes** action, including explicit authorization for registered projects. No project-name confirmation is required.
+6. Accept verified changes explicitly using the inline **Accept changes** action, before writing to the project directory. No project-name confirmation is required.
 
 7. For managed projects, optionally approve project preparation after applying changes. Python preparation creates or reuses a project virtual environment and installs declared dependencies; JVM preparation compiles and tests the actual project.
 8. Open a supported source or test file and use **Run** to execute it in the integrated terminal. Use **Stop** or **Run again** to control the execution.
