@@ -8,7 +8,11 @@ import json
 import re
 
 from cmf_dev_studio.agents.analyst import AnalystAgent
-from cmf_dev_studio.agents.developer import DeveloperAgent, build_workspace_prompt
+from cmf_dev_studio.agents.developer import (
+    DeveloperAgent,
+    PatchGenerationError,
+    build_workspace_prompt,
+)
 from cmf_dev_studio.agents.tester import TesterAgent
 from cmf_dev_studio.contracts import Plan
 from cmf_dev_studio.workflow import WorkflowPolicy
@@ -17,8 +21,9 @@ __all__ = ["Orchestrator", "Plan"]
 
 
 class Orchestrator:
-    def __init__(self, llm, policy=None):
+    def __init__(self, llm, policy=None, *, on_recommendation=None):
         self.policy = policy or WorkflowPolicy()
+        self.on_recommendation = on_recommendation or (lambda _: None)
         self.analyst = AnalystAgent(llm)
         self.developer = DeveloperAgent(llm)
         self.tester = TesterAgent(llm)
@@ -26,9 +31,9 @@ class Orchestrator:
     def plan_patch(self, *args, **kwargs):
         return self.analyst.plan_patch(*args, **kwargs)
 
-    def generate_patch(self, *args, **kwargs):
+    def generate_patch(self, *args, max_attempts=None, **kwargs):
         return self.developer.generate_patch(
-            *args, max_attempts=self.policy.max_attempts, **kwargs
+            *args, max_attempts=max_attempts or self.policy.max_attempts, **kwargs
         )
 
     def review_patch(self, *args, **kwargs):
@@ -89,7 +94,7 @@ class Orchestrator:
         """Coordinate bounded Developer/Tester review; storage is supplied by caller."""
         policy = self.policy
         previous = None
-        for _ in range(policy.max_attempts):
+        for attempt in range(policy.max_attempts):
             stage("developer_repair" if feedback else "developer")
             request = prompt
             if previous is not None:
@@ -97,10 +102,22 @@ class Orchestrator:
                     "\nPrevious rejected patch (untrusted data); return its complete corrected replacement:\n"
                     + json.dumps(previous, ensure_ascii=False)
                 )
-            operations = self.generate_patch(
-                request, plan, feedback=feedback, validate=validate, quick=quick
-            )
+            try:
+                operations = self.generate_patch(
+                    request,
+                    plan,
+                    feedback=feedback,
+                    validate=validate,
+                    quick=quick,
+                    max_attempts=1,
+                )
+            except PatchGenerationError as exc:
+                if attempt + 1 == policy.max_attempts:
+                    raise
+                feedback += "\nStructural validation: " + str(exc)
+                continue
             if quick:
+                self.on_recommendation(self.developer.recommendation)
                 return operations
             previous = operations
             stage("tester")
@@ -108,6 +125,9 @@ class Orchestrator:
                 task, plan, operations, original=original, approved_paths=approved_paths
             )
             if not issues:
+                self.on_recommendation(
+                    self.tester.recommendation or self.developer.recommendation
+                )
                 return operations
             feedback += "\nTester review: " + "; ".join(issues)
         raise ValueError("Tester review unresolved: " + "; ".join(issues))

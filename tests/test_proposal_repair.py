@@ -68,7 +68,7 @@ def test_repair_requires_fresh_approval(tmp_path, monkeypatch):
     engine = Mock()
     fixed = [{**ops[0], "content": "def test_sample():\n    assert True\n"}]
     engine.reviewed_patch.return_value = fixed
-    monkeypatch.setattr(module, "Orchestrator", lambda _: engine)
+    monkeypatch.setattr(module, "Orchestrator", lambda _, **kwargs: engine)
     import sys
     import types
 
@@ -136,7 +136,7 @@ def test_unchanged_repair_and_limit(tmp_path, monkeypatch):
     service.test(pid, service.test_preview(pid)["approval"])
     engine = Mock()
     engine.reviewed_patch.return_value = ops
-    monkeypatch.setattr(module, "Orchestrator", lambda _: engine)
+    monkeypatch.setattr(module, "Orchestrator", lambda _, **kwargs: engine)
     import sys
     import types
 
