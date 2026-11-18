@@ -1,4 +1,4 @@
-"""Conversation persistence, migration and isolation regression tests."""
+"""Conversation persistence and isolation regression tests."""
 
 import pytest
 
@@ -9,8 +9,8 @@ from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 def test_conversations(tmp_path, monkeypatch):
     """Keep separate histories and discard only conversation data."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
-    other = manager.create("other")
+    project = manager.create("sample", location=tmp_path)
+    other = manager.create("other", location=tmp_path)
     service = WorkspaceService(manager)
     monkeypatch.setattr(service, "_generate", lambda *args: None)
     first = service.create_conversation(project.id)
@@ -34,32 +34,3 @@ def test_conversations(tmp_path, monkeypatch):
         c["title"] == "Renamed"
         for c in WorkspaceService(manager).conversations(project.id)
     )
-
-
-def test_legacy_migration(tmp_path):
-    """Existing proposals retain their IDs and events after migration."""
-    manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
-    service = WorkspaceService(manager)
-    with service._db() as db:
-        db.execute(
-            "INSERT INTO workspace_proposals(id,project_id,status,task,created_at) VALUES (?,?,?,?,?)",
-            (
-                "legacy",
-                project.id,
-                "answered",
-                "Old request",
-                "2026-01-01T00:00:00+00:00",
-            ),
-        )
-        service._event(db, "legacy", "assistant_response", message="Old answer")
-    migrated = WorkspaceService(manager)
-    conversations = migrated.conversations(project.id)
-    assert len(conversations) == 1
-    assert (
-        migrated.list(project.id, conversations[0]["id"])[0]["events"][0]["details"][
-            "message"
-        ]
-        == "Old answer"
-    )
-    assert len(WorkspaceService(manager).conversations(project.id)) == 1

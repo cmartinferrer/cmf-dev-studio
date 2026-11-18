@@ -61,7 +61,7 @@ def test_jdk_change_requires_new_approval(
 ):
     """Bind approval to the selected JDK even when the command is unchanged."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample", language=language)
+    project = manager.create("sample", language=language, location=tmp_path)
     first = fake_jdk(tmp_path / "jdk17", "17")
     second = fake_jdk(tmp_path / "jdk21", "21")
     manager.update_jdk(project.id, str(first))

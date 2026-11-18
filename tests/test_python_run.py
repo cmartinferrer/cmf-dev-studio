@@ -14,7 +14,9 @@ from cmf_dev_studio.projects.models import ProjectLanguage
 
 def test_run_command_uses_exact_interpreter_and_path(tmp_path):
     """Spaces and shell metacharacters remain literal arguments."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     project = replace(project, python_interpreter=sys.executable)
     path = project.path / "a; b.py"
     path.write_text("print('ok')")
@@ -23,7 +25,9 @@ def test_run_command_uses_exact_interpreter_and_path(tmp_path):
 
 def test_run_rejects_missing_environment_and_unsafe_paths(tmp_path):
     """Only saved Python files inside the project may be run."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     (project.path / "main.py").touch()
     with pytest.raises(ValueError, match="Set up Python"):
         python_run_command(project, "main.py")
@@ -39,7 +43,7 @@ def test_run_websocket_streams_output_and_exit(tmp_path):
     """A real short-lived script produces output and a completion message."""
     data = tmp_path / "studio"
     manager = ProjectManager(data)
-    project = manager.create("Demo", language=ProjectLanguage.PYTHON)
+    project = manager.create("Demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     # A symlink is normal for a virtual environment's Python executable.
     executable = project.path / ".venv" / "bin" / "python"
     executable.parent.mkdir(parents=True)

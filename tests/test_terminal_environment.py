@@ -24,7 +24,9 @@ def make_venv(root: Path) -> Path:
 
 def test_terminal_uses_project_environment(tmp_path, monkeypatch):
     """Project Python takes priority without changing the parent environment."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     executable = make_venv(project.path / ".venv")
     monkeypatch.setenv("PATH", "/ide/bin:/usr/bin")
     monkeypatch.setenv("VIRTUAL_ENV", "/ide")
@@ -39,7 +41,9 @@ def test_terminal_uses_project_environment(tmp_path, monkeypatch):
 
 def test_selected_environment_takes_priority(tmp_path):
     """An explicit interpreter wins over the automatically detected venv."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     make_venv(project.path / ".venv")
     selected = make_venv(tmp_path / "custom")
     project = replace(project, python_interpreter=str(selected))
@@ -50,7 +54,9 @@ def test_selected_environment_takes_priority(tmp_path):
 
 def test_system_interpreter_is_not_a_virtual_environment(tmp_path, monkeypatch):
     """A selected system interpreter does not inherit the IDE's virtual environment."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     executable = tmp_path / "bin" / "python"
     executable.parent.mkdir()
     executable.touch()
@@ -65,8 +71,8 @@ def test_unconfigured_and_non_python_projects_use_system_environment(
     tmp_path, monkeypatch
 ):
     """No interpreter or a non-Python project must not inherit the IDE venv."""
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language=ProjectLanguage.PYTHON)
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     monkeypatch.setenv("PATH", "/ide/bin:/usr/bin")
     monkeypatch.setenv("VIRTUAL_ENV", "/ide")
     monkeypatch.setenv("VIRTUAL_ENV_PROMPT", "ide")
@@ -99,7 +105,7 @@ def test_terminal_uses_selected_jdk(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", "/ide/bin:/system/jdk/bin:/usr/bin")
     monkeypatch.setenv("VIRTUAL_ENV", "/ide")
     for language, home in zip(("java", "kotlin"), homes, strict=True):
-        project = manager.create(language, language=language)
+        project = manager.create(language, language=language, location=tmp_path)
         project = manager.update_jdk(project.id, str(home))
         env = terminal_environment(project)
         assert env["JAVA_HOME"] == str(home)
@@ -116,7 +122,9 @@ def test_terminal_uses_detected_jdk(tmp_path, monkeypatch):
         "cmf_dev_studio.projects.jdk_environment.discover_jdks",
         lambda: [{"path": str(home), "version": "21"}],
     )
-    project = ProjectManager(tmp_path / "studio").create("Demo", language="java")
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language="java", location=tmp_path
+    )
     env = terminal_environment(project)
     assert env["JAVA_HOME"] == str(home)
     assert env["PATH"].split(os.pathsep)[0] == str(home / "bin")
@@ -135,7 +143,9 @@ def test_shell_startup_preserves_project_environment(
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.delenv("ZDOTDIR", raising=False)
-    project = ProjectManager(tmp_path / "studio").create("Demo", language=language)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=language, location=tmp_path
+    )
     selected = tmp_path / "selected environment"
     if language == "python":
         make_venv(selected)

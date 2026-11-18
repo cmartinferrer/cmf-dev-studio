@@ -17,12 +17,23 @@ def test_create_list_and_get_persisted_project(tmp_path):
     data = tmp_path / "studio"
     with TestClient(create_app(data)) as client:
         result = client.post(
-            "/api/projects", json={"name": "Calculator", "description": "Demo"}
+            "/api/projects",
+            json={
+                "location": str(tmp_path),
+                "name": "Calculator",
+                "description": "Demo",
+            },
         )
         assert result.status_code == 201
         project = result.json()
-        assert project["kind"] == "managed"
-        assert project["read_only"] is False
+        assert set(project) == {
+            "id",
+            "name",
+            "path",
+            "description",
+            "created_at",
+            "language",
+        }
         assert project["name"] == "Calculator"
         assert client.get(f"/api/projects/{project['id']}").json() == project
     with TestClient(create_app(data)) as client:
@@ -38,8 +49,6 @@ def test_register_existing_is_editable_and_does_not_modify_files(tmp_path):
         result = client.post("/api/projects/register", json={"path": str(repository)})
         assert result.status_code == 201
         project = result.json()
-        assert project["kind"] == "existing"
-        assert project["read_only"] is False
         assert project["path"] == str(repository.resolve())
     assert source.read_text() == "print('unchanged')\n"
     assert sorted(p.name for p in repository.iterdir()) == ["main.py"]
@@ -48,9 +57,17 @@ def test_register_existing_is_editable_and_does_not_modify_files(tmp_path):
 def test_invalid_create_and_missing_project(tmp_path):
     with TestClient(create_app(tmp_path / "studio")) as client:
         assert (
-            client.post("/api/projects", json={"name": "../invalid"}).status_code == 422
+            client.post(
+                "/api/projects", json={"location": str(tmp_path), "name": "../invalid"}
+            ).status_code
+            == 422
         )
-        assert client.post("/api/projects", json={"name": ""}).status_code == 422
+        assert (
+            client.post(
+                "/api/projects", json={"location": str(tmp_path), "name": ""}
+            ).status_code
+            == 422
+        )
         assert client.get("/api/projects/nonexistent").status_code == 404
 
 
@@ -90,7 +107,12 @@ def test_project_language_http_contract(tmp_path):
     with TestClient(create_app(tmp_path / "studio")) as client:
         for language in ("python", "java", "kotlin"):
             response = client.post(
-                "/api/projects", json={"name": language, "language": language}
+                "/api/projects",
+                json={
+                    "location": str(tmp_path),
+                    "name": language,
+                    "language": language,
+                },
             )
             assert response.status_code == 201
             project = response.json()
@@ -103,12 +125,15 @@ def test_project_language_http_contract(tmp_path):
         }
         assert (
             client.post(
-                "/api/projects", json={"name": "bad", "language": "invalid"}
+                "/api/projects",
+                json={"location": str(tmp_path), "name": "bad", "language": "invalid"},
             ).status_code
             == 422
         )
         assert (
-            client.post("/api/projects", json={"name": "legacy"}).json()["language"]
+            client.post(
+                "/api/projects", json={"location": str(tmp_path), "name": "legacy"}
+            ).json()["language"]
             == "auto"
         )
 
@@ -117,8 +142,12 @@ def test_update_project_language_http_contract(tmp_path):
     """Language updates are validated, persisted and scoped to one project."""
     data = tmp_path / "studio"
     with TestClient(create_app(data)) as client:
-        project = client.post("/api/projects", json={"name": "Demo"}).json()
-        other = client.post("/api/projects", json={"name": "Other"}).json()
+        project = client.post(
+            "/api/projects", json={"location": str(tmp_path), "name": "Demo"}
+        ).json()
+        other = client.post(
+            "/api/projects", json={"location": str(tmp_path), "name": "Other"}
+        ).json()
         url = f"/api/projects/{project['id']}/language"
         for language in ("java", "kotlin", "python", "auto"):
             response = client.patch(url, json={"language": language})
@@ -169,7 +198,9 @@ def test_open_project_cannot_be_removed_or_deleted(tmp_path):
 def test_multiple_workspace_sessions(tmp_path):
     """Closing one browser tab cannot unlock a project in another tab."""
     with TestClient(create_app(tmp_path / "studio")) as client:
-        project = client.post("/api/projects", json={"name": "sample"}).json()
+        project = client.post(
+            "/api/projects", json={"location": str(tmp_path), "name": "sample"}
+        ).json()
         url = f"/api/projects/{project['id']}"
         for session in ("one", "two"):
             assert (
@@ -190,8 +221,17 @@ def test_multiple_workspace_sessions(tmp_path):
 def test_workspace_presence_disconnect(tmp_path):
     """A disconnected workspace releases its own presence lock."""
     with TestClient(create_app(tmp_path / "studio")) as client:
-        project = client.post("/api/projects", json={"name": "sample"}).json()
+        project = client.post(
+            "/api/projects", json={"location": str(tmp_path), "name": "sample"}
+        ).json()
         url = f"/api/projects/{project['id']}"
         with client.websocket_connect(url + "/presence?session=one"):
             assert client.delete(url, params={"confirmed": True}).status_code == 409
         assert client.delete(url, params={"confirmed": True}).status_code == 200
+
+
+def test_create_requires_location(tmp_path):
+    """The API never creates projects inside internal storage by default."""
+    with TestClient(create_app(tmp_path / "studio")) as client:
+        assert client.post("/api/projects", json={"name": "Demo"}).status_code == 422
+        assert client.get("/api/projects").json() == []

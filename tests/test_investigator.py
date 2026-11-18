@@ -139,7 +139,9 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
     monkeypatch.setattr(workspaces, "Thread", InlineThread)
     monkeypatch.setattr(workspaces, "Orchestrator", Engine)
     client = TestClient(create_app(tmp_path / "data"))
-    project = client.post("/api/projects", json={"name": "sample"}).json()
+    project = client.post(
+        "/api/projects", json={"location": str(tmp_path), "name": "sample"}
+    ).json()
     from pathlib import Path
 
     source = Path(project["path"]) / "Hola.java"

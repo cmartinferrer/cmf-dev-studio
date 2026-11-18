@@ -15,7 +15,9 @@ def project(tmp_path, monkeypatch):
         "environment_info",
         lambda _: {"current": {"path": "/jdk", "version": "21"}},
     )
-    return ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.JAVA)
+    return ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.JAVA, location=tmp_path
+    )
 
 
 def write_source(project, path, source):
@@ -90,7 +92,9 @@ def test_websocket_runs_wrapper(tmp_path, monkeypatch):
     from cmf_dev_studio.api.app import create_app
 
     data = tmp_path / "studio"
-    project = ProjectManager(data).create("Demo", language=ProjectLanguage.JAVA)
+    project = ProjectManager(data).create(
+        "Demo", language=ProjectLanguage.JAVA, location=tmp_path
+    )
     jdk = {"path": "/jdk", "version": "21"}
     monkeypatch.setattr(jvm_run, "environment_info", lambda _: {"current": jdk})
     monkeypatch.setattr(

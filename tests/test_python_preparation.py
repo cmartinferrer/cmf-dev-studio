@@ -19,7 +19,9 @@ from cmf_dev_studio.workspaces import WorkspaceService
 
 def test_install_targets_project_environment(tmp_path):
     """Use an explicit interpreter and keep the IDE environment out of uv."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     root = project.path / ".venv"
     python = _venv_python(root)
     python.parent.mkdir(parents=True)
@@ -48,8 +50,8 @@ def test_install_targets_project_environment(tmp_path):
 
 def test_external_interpreter_is_not_modified(tmp_path):
     """Never install into a custom system or shared interpreter."""
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language=ProjectLanguage.PYTHON)
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     project = manager.update_python_interpreter(project.id, "/usr/bin/python3", "3.12")
     assert not preparation_needed(project, [])
     with (
@@ -63,8 +65,8 @@ def test_external_interpreter_is_not_modified(tmp_path):
 @pytest.mark.parametrize("confirmed", [True, False])
 def test_preparation_decision_persists(tmp_path, confirmed):
     """Require a pending applied proposal and persist the decision and result."""
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language=ProjectLanguage.PYTHON)
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     service = WorkspaceService(manager)
     pid = "a" * 32
     with service._db() as db:
@@ -75,7 +77,7 @@ def test_preparation_decision_persists(tmp_path, confirmed):
         service._event(db, pid, "environment_offered")
     url = f"/api/proposals/{pid}/prepare-python"
     with (
-        TestClient(create_app(tmp_path)) as client,
+        TestClient(create_app(manager.data_dir)) as client,
         patch("cmf_dev_studio.workspaces.prepare_environment") as prepare,
     ):
         assert client.post(url, json={}).status_code == 422
@@ -94,8 +96,8 @@ def test_apply_offers_preparation_without_installing(tmp_path, monkeypatch):
     """Applying Python files offers setup but does not execute installation."""
     from cmf_dev_studio import workspaces
 
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language=ProjectLanguage.PYTHON)
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     service = WorkspaceService(manager)
     pid = "b" * 32
     workspace = service.root / pid

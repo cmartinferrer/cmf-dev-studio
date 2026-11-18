@@ -27,7 +27,7 @@ def test_snapshot_validation():
 def test_snapshot_persists_on_retry(tmp_path, monkeypatch):
     """Keep the original snapshot without implicitly approving any files."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
 
     class FakeThread:
@@ -91,7 +91,9 @@ def test_api_passes_terminal_evidence_to_agents(tmp_path, monkeypatch):
     monkeypatch.setattr(workspaces, "Orchestrator", FakeEngine)
     monkeypatch.setattr(workspaces, "Thread", InlineThread)
     client = TestClient(create_app(tmp_path / "data"))
-    project = client.post("/api/projects", json={"name": "sample"}).json()
+    project = client.post(
+        "/api/projects", json={"location": str(tmp_path), "name": "sample"}
+    ).json()
     response = client.post(
         f"/api/projects/{project['id']}/proposals",
         json={

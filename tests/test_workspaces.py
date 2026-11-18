@@ -72,7 +72,9 @@ def fake_gemini(response):
 
 def test_new_project_proposal_api(tmp_path):
     client = TestClient(create_app(tmp_path / "data"))
-    project = client.post("/api/projects", json={"name": "hello-fastapi"}).json()
+    project = client.post(
+        "/api/projects", json={"location": str(tmp_path), "name": "hello-fastapi"}
+    ).json()
     response = {
         "operations": [
             {
@@ -210,7 +212,9 @@ def test_empty_project_language_reaches_all_agents(tmp_path, language, label, fi
     from cmf_dev_studio.workspaces import WorkspaceService
 
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Calculator", language=ProjectLanguage(language))
+    project = manager.create(
+        "Calculator", language=ProjectLanguage(language), location=tmp_path
+    )
     service = WorkspaceService(manager)
     llm = Mock()
     llm.generate.side_effect = [
@@ -264,7 +268,9 @@ def test_empty_project_retries_empty_patch_without_context(tmp_path):
     from cmf_dev_studio.workspaces import WorkspaceService
 
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Calculator", language=ProjectLanguage.JAVA)
+    project = manager.create(
+        "Calculator", language=ProjectLanguage.JAVA, location=tmp_path
+    )
     service = WorkspaceService(manager)
     llm = Mock()
     llm.generate.side_effect = [

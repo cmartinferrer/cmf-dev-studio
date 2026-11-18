@@ -20,7 +20,9 @@ from cmf_dev_studio.projects.python_environment import (
 
 def test_detection_does_not_execute_interpreter(tmp_path):
     """Opening a project reads venv metadata without executing code."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     root = project.path / ".venv"
     executable = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     executable.parent.mkdir(parents=True)
@@ -36,7 +38,9 @@ def test_detection_does_not_execute_interpreter(tmp_path):
 
 def test_creation_uses_uv_and_preserves_existing_environment(tmp_path):
     """Creation uses an explicit target and never overwrites an existing venv."""
-    project = ProjectManager(tmp_path).create("Demo", language=ProjectLanguage.PYTHON)
+    project = ProjectManager(tmp_path / "studio").create(
+        "Demo", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     with (
         patch("shutil.which", return_value="/usr/bin/uv"),
         patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0)) as run,
@@ -54,7 +58,7 @@ def test_creation_uses_uv_and_preserves_existing_environment(tmp_path):
 
 def test_missing_uv(tmp_path):
     """Missing uv is reported without running a command."""
-    project = ProjectManager(tmp_path).create("Demo")
+    project = ProjectManager(tmp_path / "studio").create("Demo", location=tmp_path)
     with (
         patch("shutil.which", return_value=None),
         pytest.raises(ValueError, match="uv is not installed"),
@@ -78,10 +82,12 @@ def test_environment_http_contract(tmp_path):
     data = tmp_path / "studio"
     with TestClient(create_app(data)) as client:
         project = client.post(
-            "/api/projects", json={"name": "Python", "language": "python"}
+            "/api/projects",
+            json={"location": str(tmp_path), "name": "Python", "language": "python"},
         ).json()
         other = client.post(
-            "/api/projects", json={"name": "Java", "language": "java"}
+            "/api/projects",
+            json={"location": str(tmp_path), "name": "Java", "language": "java"},
         ).json()
         url = f"/api/projects/{project['id']}/python-environment"
         other_url = f"/api/projects/{other['id']}/python-environment"

@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from threading import Thread
+from threading import RLock, Thread
 from uuid import uuid4
 
 from cmf_dev_studio.agents.developer import build_workspace_prompt
@@ -26,6 +26,7 @@ from cmf_dev_studio.project_runners import (
     execute_runner,
     select_runner,
 )
+from cmf_dev_studio.projects.intelligence import prepare_context
 from cmf_dev_studio.projects.jdk_environment import environment_info as jdk_info
 from cmf_dev_studio.projects.jvm_preparation import preparation_spec, prepare_jvm
 from cmf_dev_studio.projects.manager import ProjectManager
@@ -293,26 +294,14 @@ class WorkspaceService:
             db.execute("""CREATE TABLE IF NOT EXISTS workspace_proposals (
                 id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL,
                 task TEXT NOT NULL, created_at TEXT NOT NULL, error TEXT NOT NULL DEFAULT '',
-                changes TEXT NOT NULL DEFAULT '[]')""")
-            cols = {r[1] for r in db.execute("PRAGMA table_info(workspace_proposals)")}
-            if "test_output" not in cols:
-                db.execute(
-                    "ALTER TABLE workspace_proposals ADD COLUMN test_output TEXT NOT NULL DEFAULT ''"
-                )
-            for name, definition in [
-                ("conversation_id", "TEXT"),
-                ("approved_paths", "TEXT NOT NULL DEFAULT '[]'"),
-                ("assistant_language", "TEXT NOT NULL DEFAULT ''"),
-                ("terminal_context", "TEXT NOT NULL DEFAULT '[]'"),
-                ("plan", "TEXT NOT NULL DEFAULT '{}'"),
-                ("attempts", "INTEGER NOT NULL DEFAULT 0"),
-                ("tested_digest", "TEXT NOT NULL DEFAULT ''"),
-                ("agent_stage", "TEXT NOT NULL DEFAULT ''"),
-            ]:
-                if name not in cols:
-                    db.execute(
-                        f"ALTER TABLE workspace_proposals ADD COLUMN {name} {definition}"
-                    )
+                changes TEXT NOT NULL DEFAULT '[]',
+                test_output TEXT NOT NULL DEFAULT '', conversation_id TEXT,
+                approved_paths TEXT NOT NULL DEFAULT '[]',
+                assistant_language TEXT NOT NULL DEFAULT '',
+                terminal_context TEXT NOT NULL DEFAULT '[]',
+                plan TEXT NOT NULL DEFAULT '{}', attempts INTEGER NOT NULL DEFAULT 0,
+                tested_digest TEXT NOT NULL DEFAULT '', agent_stage TEXT NOT NULL DEFAULT '',
+                snapshot_digest TEXT NOT NULL DEFAULT '')""")
 
             db.execute("""CREATE TABLE IF NOT EXISTS proposal_events (
                 sequence INTEGER PRIMARY KEY AUTOINCREMENT, proposal_id TEXT NOT NULL,
@@ -324,10 +313,95 @@ class WorkspaceService:
             db.execute(
                 "CREATE INDEX IF NOT EXISTS proposals_conversation ON workspace_proposals(conversation_id)"
             )
-            for row in db.execute(
-                "SELECT DISTINCT project_id FROM workspace_proposals WHERE conversation_id IS NULL"
-            ).fetchall():
-                self._conversation(db, row[0])
+        self._cleanup_finished()
+        self._cleanup_orphan_snapshots()
+
+    def _compact_finished(self, proposal_id: str) -> None:
+        """Release snapshots while preserving historical diffs and context identity."""
+        with _APPLY_LOCK:
+            row = self.get(proposal_id)
+            cancelled = row["status"] == "failed" and any(
+                event["kind"] == "generation_cancelled" for event in row["events"]
+            )
+            if row["status"] not in ("answered", "applied") and not cancelled:
+                return
+            baseline = self.baselines / proposal_id
+            workspace = self.root / proposal_id
+            if any(
+                path.is_symlink()
+                for path in (self.baselines, self.root, baseline, workspace)
+            ):
+                return
+            try:
+                with self._db() as db:
+                    saved = db.execute(
+                        "SELECT snapshot_digest FROM workspace_proposals WHERE id=?",
+                        (proposal_id,),
+                    ).fetchone()[0]
+                    if not saved and baseline.is_dir():
+                        db.execute(
+                            "UPDATE workspace_proposals SET snapshot_digest=? WHERE id=?",
+                            (tree_digest(baseline), proposal_id),
+                        )
+                for root, excluded_action in (
+                    (baseline, "create"),
+                    (workspace, "delete"),
+                ):
+                    if not root.is_dir():
+                        continue
+                    keep = {
+                        safe_path(change["path"])
+                        for change in row["changes"]
+                        if (row["status"] == "applied" or cancelled)
+                        and change["action"] != excluded_action
+                    }
+                    for path in sorted(root.rglob("*"), reverse=True):
+                        if path.is_symlink() or path.is_file():
+                            if path.relative_to(root) not in keep:
+                                path.unlink()
+                        elif path.is_dir() and not any(path.iterdir()):
+                            path.rmdir()
+                    if not any(root.iterdir()):
+                        root.rmdir()
+            except (OSError, WorkspaceError):
+                # Cleanup is best effort; the next startup can retry it.
+                return
+
+    def _cleanup_finished(self) -> None:
+        with _APPLY_LOCK, self._db() as db:
+            ids = [
+                row[0]
+                for row in db.execute(
+                    "SELECT id FROM workspace_proposals WHERE status IN ('answered','applied') "
+                    "OR (status='failed' AND EXISTS (SELECT 1 FROM proposal_events "
+                    "WHERE proposal_id=workspace_proposals.id AND kind='generation_cancelled'))"
+                )
+            ]
+        for proposal_id in ids:
+            # Only operate on generated identifiers, never arbitrary database paths.
+            if len(proposal_id) == 32 and all(
+                c in "0123456789abcdef" for c in proposal_id
+            ):
+                self._compact_finished(proposal_id)
+
+    def _cleanup_orphan_snapshots(self) -> None:
+        """Remove unregistered snapshots, never recovery backups or unknown paths."""
+        with _APPLY_LOCK, self._db() as db:
+            registered = {
+                row[0] for row in db.execute("SELECT id FROM workspace_proposals")
+            }
+            for root in (self.root, self.baselines):
+                if root.is_symlink():
+                    continue
+                for path in root.iterdir():
+                    if (
+                        len(path.name) == 32
+                        and all(c in "0123456789abcdef" for c in path.name)
+                        and path.name not in registered
+                        and path.is_dir()
+                        and not path.is_symlink()
+                    ):
+                        shutil.rmtree(path, ignore_errors=True)
 
     def _conversation(self, db, project_id, conversation_id=None):
         if conversation_id is None:
@@ -419,6 +493,42 @@ class WorkspaceService:
             shutil.rmtree(self.baselines / row["id"], ignore_errors=True)
         return {"deleted": True}
 
+    def remove_project(self, project_id: str, *, from_disk: bool = False) -> bool:
+        """Remove a closed project's registry, history and disposable snapshots."""
+        with _APPLY_LOCK:
+            with self._db() as db:
+                rows = db.execute(
+                    "SELECT id,status FROM workspace_proposals WHERE project_id=?",
+                    (project_id,),
+                ).fetchall()
+            if any(
+                row["status"] in ("queued", "running", "generating", "repairing")
+                for row in rows
+            ):
+                raise WorkspaceError("Wait for the active AI operation")
+            if not self.manager.delete(project_id, from_disk=from_disk):
+                return False
+            with self._db() as db:
+                db.execute(
+                    "DELETE FROM proposal_events WHERE proposal_id IN "
+                    "(SELECT id FROM workspace_proposals WHERE project_id=?)",
+                    (project_id,),
+                )
+                db.execute(
+                    "DELETE FROM workspace_proposals WHERE project_id=?", (project_id,)
+                )
+                db.execute(
+                    "DELETE FROM conversations WHERE project_id=?", (project_id,)
+                )
+            for row in rows:
+                self._test_approvals.pop(row["id"], None)
+                pid = row["id"]
+                if len(pid) == 32 and all(c in "0123456789abcdef" for c in pid):
+                    for root in (self.root, self.baselines):
+                        if not root.is_symlink():
+                            shutil.rmtree(root / pid, ignore_errors=True)
+            return True
+
     def move_resource(self, project_id, operation):
         """Invalidate pending proposals when the project layout changes."""
         with _APPLY_LOCK, self._db() as db:
@@ -441,7 +551,9 @@ class WorkspaceService:
                 )
                 self._event(db, pid, "layout_changed", error=error)
                 self._event(db, pid, "generation_cancelled")
-            return result
+        for row in rows:
+            self._compact_finished(row["id"])
+        return result
 
     @staticmethod
     def _event(db, proposal_id, kind, **details):
@@ -540,6 +652,7 @@ class WorkspaceService:
             if not retry:
                 with self._db() as db:
                     self._event(db, proposal_id, "generation_cancelled")
+                self._compact_finished(proposal_id)
                 return self.get(proposal_id)
             project = self.manager.get(row["project_id"])
             baseline = self.baselines / proposal_id
@@ -547,8 +660,6 @@ class WorkspaceService:
                 raise WorkspaceError(
                     "Original project or proposal baseline unavailable"
                 )
-            from cmf_dev_studio.projects.intelligence import prepare_context
-
             paths = row["approved_paths"] if context_paths is None else context_paths
             if context_paths is None and row["assistant_language"]:
                 paths = next(
@@ -690,8 +801,9 @@ class WorkspaceService:
             # Historical answers are evidence only for the snapshot they described.
             try:
                 unchanged = (
-                    baseline.is_dir() and tree_digest(baseline) == current_digest
-                )
+                    previous.get("snapshot_digest")
+                    or (tree_digest(baseline) if baseline.is_dir() else None)
+                ) == current_digest
             except (OSError, WorkspaceError):
                 unchanged = False
             history.append(
@@ -874,8 +986,6 @@ class WorkspaceService:
             raise WorkspaceError("Task must be between 1 and 24000 characters")
         if len(selected_paths) > 8 or len(set(selected_paths)) != len(selected_paths):
             raise WorkspaceError("Select at most 8 unique reference files")
-        from cmf_dev_studio.projects.intelligence import prepare_context
-
         context = prepare_context(project.path, selected_paths)
         if selected_paths and context_digest != context["digest"]:
             raise WorkspaceError(
@@ -884,25 +994,20 @@ class WorkspaceService:
         with self._db() as db:
             conversation_id = self._conversation(db, project_id, conversation_id)["id"]
         proposal_id = uuid4().hex
-        workspace = self.root / proposal_id
-        workspace.mkdir()
-        try:
-            original = snapshot(project.path, workspace)
-        except Exception:
-            shutil.rmtree(workspace, ignore_errors=True)
-            raise
-        for file in context["files"]:
-            if original.get(file["path"]) != file["content"].encode("utf-8"):
-                shutil.rmtree(workspace, ignore_errors=True)
-                raise WorkspaceError(
-                    "Approved context changed during snapshot; review again"
-                )
+        # Capture the immutable baseline once. A writable workspace is only
+        # needed if the assistant actually generates file operations.
         baseline = self.baselines / proposal_id
         baseline.mkdir()
-        for name, data in original.items():
-            destination = baseline / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(data)
+        try:
+            original = snapshot(project.path, baseline)
+            for file in context["files"]:
+                if original.get(file["path"]) != file["content"].encode("utf-8"):
+                    raise WorkspaceError(
+                        "Approved context changed during snapshot; review again"
+                    )
+        except Exception:
+            shutil.rmtree(baseline, ignore_errors=True)
+            raise
         now = datetime.now(timezone.utc).isoformat()
         with self._db() as db:
             db.execute(
@@ -955,6 +1060,8 @@ class WorkspaceService:
                 )
             elif status == "failed":
                 self._event(db, proposal_id, "generation_failed", error=error)
+        if status == "answered":
+            self._compact_finished(proposal_id)
 
     def _stage(self, proposal_id: str, stage: str, *, plan: Plan | None = None):
         with self._db() as db:
@@ -989,6 +1096,7 @@ class WorkspaceService:
         self, proposal_id: str, operations: list[dict], original: dict[str, bytes]
     ) -> list[dict]:
         workspace = self.root / proposal_id
+        workspace.mkdir(exist_ok=True)
         # Clear previous generated files, never the baseline or the real project.
         for stale in sorted(workspace.rglob("*"), reverse=True):
             if stale.is_symlink() or stale.is_file():
@@ -1283,9 +1391,7 @@ class WorkspaceService:
 
 
 # v2.2: verified application and isolated project-level test execution.
-import threading
-
-_APPLY_LOCK = threading.RLock()
+_APPLY_LOCK = RLock()
 
 
 def _checked_target(root: Path, path: str) -> Path:
@@ -1422,7 +1528,6 @@ def _apply_proposal(
     self: WorkspaceService,
     proposal_id: str,
     approved: bool,
-    allow_existing: bool = False,
 ) -> dict:
     with _APPLY_LOCK:
         row = self.get(proposal_id)
@@ -1510,6 +1615,7 @@ def _apply_proposal(
             raise
         finally:
             shutil.rmtree(backup, ignore_errors=True)
+        self._compact_finished(proposal_id)
         return self.get(proposal_id)
 
 

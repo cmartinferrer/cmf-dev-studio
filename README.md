@@ -49,14 +49,14 @@ The project remains an ongoing learning and engineering initiative. By releasing
 - **Project environments:** select or create Python virtual environments with uv, or select a locally installed JDK for Java and Kotlin. Settings are persisted per project.
 - **Integrated execution:** project-specific environments are used by the terminal and agent test runners. Bash and Zsh initialization preserves the selected environment without editing personal shell configuration.
 - **Multi-language testing:** automatic runner selection for Python/pytest, Java/Maven and Kotlin/Gradle, with priority given to existing Maven and Gradle wrappers.
-- **Project preparation:** explicitly approve dependency installation for Python or compilation and tests for JVM managed projects after applying changes.
+- **Project preparation:** explicitly approve dependency installation for Python or compilation and tests for JVM projects after applying changes.
 - **Run from the editor:** execute Python scripts, conventional Java and Kotlin entry points and JVM test classes, with terminal output, exit codes, Stop and Run again.
 - **Iterative review:** bounded functional review and test-quality guidance; failed tests can trigger a user-requested repair, with fresh approval before executing a changed proposal.
 - **Explicit context approval:** inspect and authorize eligible file contents before they are provided to the AI provider. The active file is suggested automatically; additional files can be selected manually or through the explorer.
 - **Conversational workflow:** inline approvals, persisted chat history and retries with original or updated context.
 - **Fresh investigation context:** historical assistant answers are reused only when the bounded project snapshot is unchanged. After a source change, user requests remain available for continuity, but old answers are omitted from the model context. Current dependencies require fresh evidence and exploration approval when needed. The visible chat history is preserved.
 - **Human-controlled application:** review and test isolated changes before explicitly applying them to the original project.
-- **Local persistence:** SQLite project registry and proposal history, with snapshots stored on disk.
+- **Local persistence:** SQLite project registry and proposal history. An immutable baseline is captured per request; a writable proposal workspace is created only when file operations are generated. Completed proposals retain only the files needed for historical diffs; answered requests release their snapshots.
 
 ## Architecture
 
@@ -109,14 +109,15 @@ The orchestrator is the sole agent coordination module. The workspace service su
 ```mermaid
 flowchart TD
     Task[User request] --> Context[Authorize required context]
-    Context --> Snapshot[Create isolated snapshot]
+    Context --> Snapshot[Capture immutable baseline]
     Snapshot --> Analyst[Analyst: requirements and acceptance criteria]
     Analyst --> Developer[Developer: proposed file operations]
     Developer --> Validate[Validate paths, permissions and operations]
     Validate --> Tester[Tester: independent review]
     Tester --> Review{Review accepted?}
     Review -->|No, retry allowed| Developer
-    Review -->|Yes| Permission{Approve local command?}
+    Review -->|Yes| Workspace[Create writable proposal workspace]
+    Workspace --> Permission{Approve local command?}
     Permission -->|Yes| Run[Execute selected test runner]
     Permission -->|No| Keep
     Run --> Result{Tests pass?}
@@ -208,14 +209,14 @@ Open [http\://127.0.0.1:5173](http\://127.0.0.1:5173). The frontend proxies API 
 
 ## Using the IDE
 
-1. Create a managed project or choose **Open existing project** and register a local directory. Select the project language when creating a project or update it from the workspace status bar.
+1. Create a project in a selected local directory or choose **Open existing project** and register a local directory. Select the project language when creating a project or update it from the workspace status bar.
 2. Browse and manage files and folders in the explorer. Use Ctrl/Cmd-click or Shift-click for multi-selection, drag and drop to move items, and Copy/Paste to duplicate them. Open files in the editor or use the integrated terminal.
 3. Open the assistant and describe a concrete development task. Review the suggested active-file context, remove unwanted files or add context manually, then authorize eligible contents before sending them to the AI provider.
 4. Inspect the acceptance criteria, generated file operations and diffs. Approve the displayed native test command before execution.
 5. Review the test output. If verification fails, inspect the error and request a repair when appropriate. A changed proposal requires fresh execution approval. Generation retries can reuse the original context or use an explicitly approved replacement.
 6. Accept verified changes explicitly using the inline **Accept changes** action, before writing to the project directory. No project-name confirmation is required.
 
-7. For managed projects, optionally approve project preparation after applying changes. Python preparation creates or reuses a project virtual environment and installs declared dependencies; JVM preparation compiles and tests the actual project.
+7. Optionally approve project preparation after applying changes. Python preparation creates or reuses a project virtual environment and installs declared dependencies; JVM preparation compiles and tests the actual project.
 8. Open a supported source or test file and use **Run** to execute it in the integrated terminal. Use **Stop** or **Run again** to control the execution.
 
 ### Workspace layout
@@ -224,7 +225,7 @@ The top bar displays the Studio brand only. Use Overview to create, open or swit
 
 ### Project programming language
 
-New managed projects can select Python, Java or Kotlin. The setting is persisted and supplied to the agents during proposal generation. Existing projects may use automatic detection. Runner selection still follows the build files; the language setting is not a security restriction.
+New projects can select Python, Java or Kotlin. The setting is persisted and supplied to the agents during proposal generation. Existing projects may use automatic detection. Runner selection still follows the build files; the language setting is not a security restriction.
 
 ### Project environments
 
@@ -237,7 +238,7 @@ Environment settings are persisted per project. Restart the integrated terminal 
 
 ### Project preparation
 
-After accepting a proposal in a managed project, the assistant can offer to prepare it. This is optional and requires explicit approval. Python preparation installs declared dependencies into the managed project environment. JVM preparation runs the appropriate Maven or Gradle build and tests in the actual project, using its selected JDK and wrapper when available. Unlike proposal verification, preparation can create build artifacts in the original workspace.
+After accepting a proposal in a project, the assistant can offer to prepare it. This is optional and requires explicit approval. Python preparation installs declared dependencies into the project environment. JVM preparation runs the appropriate Maven or Gradle build and tests in the actual project, using its selected JDK and wrapper when available. Unlike proposal verification, preparation can create build artifacts in the original workspace.
 
 ### Running code from the editor
 
@@ -267,12 +268,12 @@ The same process works with `examples/kotlin-gradle` and `examples/python-pytest
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Credentials for the Gemini SDK | Required for AI tasks |
-| `STUDIO_DATA_DIR` | Registry, managed projects and proposal snapshots | `.studio-data` |
+| `STUDIO_DATA_DIR` | Registry and proposal snapshots | `.studio-data` |
 | `STUDIO_BROWSE_ROOT` | Root directory for the folder picker | User home |
 
 The Gemini adapter currently defaults to `gemini-3.5-flash-lite`; model availability depends on the provider and account. The model is configured in code, not through a dedicated environment variable. Export the optional `STUDIO_*` variables in the backend shell before starting it; the API reads them from the process environment. The `.env` file is loaded for AI operations.
 
-Keep `.studio-data/` and `.env` when upgrading. The registry stores absolute project paths, so moving a checkout that contains managed projects can invalidate their paths. Keep the existing checkout location or explicitly migrate those paths before moving it.
+Keep `.studio-data/` and `.env` when upgrading between compatible versions. The registry stores absolute project paths. This development schema is incompatible with the previous project registry: stop Studio and move the old data directory to a backup location before starting. Re-register local projects afterward. Removing a project from Studio preserves its source files but removes its Studio conversations and proposal history. Do not delete the backup if it contains project files.
 
 ## Project structure
 
@@ -325,7 +326,7 @@ cd frontend
 npm run build
 ```
 
-For end-to-end verification, open each reference project in the IDE, select its environment, submit a change, authorize context, inspect test results and apply the verified proposal. For managed projects, also verify approved preparation. Run supported source files and JVM test classes from the editor and check Stop and Run again. AI-assisted steps require valid Gemini credentials. Automated regression tests cover environment selection, shell startup, runner environments, wrappers, preparation and editor execution.
+For end-to-end verification, open each reference project in the IDE, select its environment, submit a change, authorize context, inspect test results and apply the verified proposal. Also verify approved preparation. Run supported source files and JVM test classes from the editor and check Stop and Run again. AI-assisted steps require valid Gemini credentials. Automated regression tests cover environment selection, shell startup, runner environments, wrappers, preparation and editor execution.
 
 ## Code quality
 
@@ -365,7 +366,7 @@ Native integration tests and Gemini-powered end-to-end checks are separate from 
 - Approved test commands run with your user permissions and Internet access in a disposable copy. This is not a security sandbox. Code can access your home directory and network.
 - Applying a proposal requires explicit approval and conflict checks. Local code can still access original repositories.
 - The integrated terminal and editor execution run on the host with the user's permissions; they are not sandboxed.
-- Approved project preparation runs in the actual managed project. Dependency installation, Maven and Gradle build scripts and wrappers can execute code and access the network and filesystem. Only approve commands and use wrappers from trusted projects.
+- Approved project preparation runs in the actual project. Dependency installation, Maven and Gradle build scripts and wrappers can execute code and access the network and filesystem. Only approve commands and use wrappers from trusted projects.
 - Use trusted repositories only. This application is not a hardened security boundary for hostile code or multi-tenant deployment.
 
 ### Dependency security
@@ -389,7 +390,7 @@ To add an AI provider, implement the `LLMClient` contract in `llm/`, including s
 ## Current limitations
 
 - Only the documented native runner combinations are supported for verification. JVM support focuses on conventional single-module projects; arbitrary dependency graphs, custom source layouts and complex multi-module builds are not guaranteed to work.
-- Project preparation from chat is limited to managed projects. Existing wrappers are supported but are not generated automatically; JDKs and global build tools must be installed separately when needed.
+- Project preparation from chat requires explicit approval. Existing wrappers are supported but are not generated automatically; JDKs and global build tools must be installed separately when needed.
 - Editor execution supports Python scripts, conventional JVM entry points and JVM test classes. Debugging, advanced run configurations and custom program arguments are not supported. JDK selection does not automatically resolve build-specific version requirements.
 - The assistant supports conversational change proposals and retries, but is not yet a general-purpose coding assistant.
 - Explorer copy and move operations are limited to the current project and do not automatically refactor imports or code references.
@@ -420,4 +421,4 @@ CMF Dev Studio is open-source software released under the [MIT License](LICENSE)
 Copyright © 2026 Cristian Martín Ferrer.
 ### AI conversations
 
-Each project has independent, persistent conversations. Use the assistant history, new conversation and options controls to switch, rename, clear or delete a conversation. Existing proposal history is migrated into an initial conversation automatically. Dates and times use the browser's local timezone. Clearing or deleting a conversation discards its pending proposals and review snapshots, but never reverts project files. Conversation switching and deletion are disabled during active AI operations. The existing project-level proposal API remains available for compatibility.
+Each project has independent, persistent conversations. Use the assistant history, new conversation and options controls to switch, rename, clear or delete a conversation. Dates and times use the browser's local timezone. Clearing or deleting a conversation discards its pending proposals and review snapshots, but never reverts project files. Conversation switching and deletion are disabled during active AI operations. Removing a project from the workspace also removes its conversation history and proposal snapshots, but preserves its source files. Deleting a project from disk additionally removes its source files.

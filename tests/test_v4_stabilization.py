@@ -130,7 +130,7 @@ def test_existing_broken_proposal_requires_new_approval(tmp_path, monkeypatch, i
     from cmf_dev_studio.projects import ProjectLanguage, ProjectManager
 
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("demo", language=ProjectLanguage.PYTHON)
+    project = manager.create("demo", language=ProjectLanguage.PYTHON, location=tmp_path)
     service = ws.WorkspaceService(manager)
     pid = "a" * 32
     baseline = service.baselines / pid
