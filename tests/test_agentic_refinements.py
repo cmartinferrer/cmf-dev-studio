@@ -11,7 +11,7 @@ from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 def proposal(tmp_path):
     """Create a proposal with a real project and immutable baseline."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     pid = "sample"
     (service.root / pid).mkdir()

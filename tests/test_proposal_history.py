@@ -10,7 +10,7 @@ from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 def test_history_survives_restart_and_multiple_attempts(tmp_path, monkeypatch):
     """Keep decisions and each test output after applying and reopening."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     pid = "b" * 32
     workspace = service.root / pid

@@ -11,9 +11,9 @@ def proposal(tmp_path, existing=False):
     if existing:
         source = tmp_path / "source"
         source.mkdir()
-        project = manager.register_existing(source, "sample")
+        project = manager.register_existing(source)
     else:
-        project = manager.create("sample")
+        project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     proposal_id = "a" * 32
     workspace = service.root / proposal_id
@@ -45,7 +45,7 @@ def proposal(tmp_path, existing=False):
     return service, project, proposal_id
 
 
-def test_apply_managed(tmp_path):
+def test_apply_new_project(tmp_path):
     service, project, pid = proposal(tmp_path)
     with pytest.raises(WorkspaceError, match="Explicit approval"):
         service.apply(pid, False)

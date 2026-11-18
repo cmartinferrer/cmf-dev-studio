@@ -117,10 +117,10 @@ def create_environment(project: Project) -> None:
 
 
 def preparation_needed(project: Project, changes: list[dict]) -> bool:
-    """Offer setup only for managed Python projects with a local environment."""
+    """Offer setup only for Python projects with a local environment."""
     info = environment_info(project)
     root = project.path / ".venv"
-    if project.read_only or not info["supported"] or root.is_symlink():
+    if not info["supported"] or root.is_symlink():
         return False
     if project.python_interpreter and Path(project.python_interpreter) != _venv_python(
         root
@@ -138,12 +138,8 @@ def prepare_environment(project: Project) -> None:
     """Install declared dependencies only in the project's own .venv."""
     root = project.path / ".venv"
     python = _venv_python(root)
-    if (
-        project.read_only
-        or not environment_info(project)["supported"]
-        or root.is_symlink()
-    ):
-        raise ValueError("Preparation requires a managed Python project")
+    if not environment_info(project)["supported"] or root.is_symlink():
+        raise ValueError("Preparation requires a Python project")
     if project.python_interpreter and Path(project.python_interpreter) != python:
         raise ValueError(
             "Select the project environment before installing dependencies"

@@ -46,16 +46,14 @@ class ProjectResponse(BaseModel):
     id: str
     name: str
     path: str
-    kind: Literal["managed", "existing"]
     description: str
     created_at: str
-    read_only: bool
     language: ProjectLanguage
 
 
 class CreateProjectRequest(BaseModel):
     language: ProjectLanguage = ProjectLanguage.AUTO
-    location: str | None = None
+    location: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=2000)
 
@@ -66,8 +64,6 @@ class UpdateProjectLanguageRequest(BaseModel):
 
 class RegisterProjectRequest(BaseModel):
     path: str = Field(min_length=1)
-    name: str | None = None
-    description: str = Field(default="", max_length=2000)
 
 
 def _response(project: Project) -> ProjectResponse:
@@ -75,10 +71,8 @@ def _response(project: Project) -> ProjectResponse:
         id=project.id,
         name=project.name,
         path=str(project.path),
-        kind=project.kind.value,
         description=project.description,
         created_at=project.created_at,
-        read_only=project.read_only,
         language=project.language,
     )
 
@@ -137,11 +131,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     )
     def register_project(request: RegisterProjectRequest) -> ProjectResponse:
         try:
-            return _response(
-                manager.register_existing(
-                    request.path, request.name, request.description
-                )
-            )
+            return _response(manager.register_existing(request.path))
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -331,7 +321,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     status_code=409, detail="Wait for the active AI operation"
                 )
             try:
-                deleted = manager.delete(project_id, from_disk=from_disk)
+                deleted = workspaces.remove_project(project_id, from_disk=from_disk)
+            except WorkspaceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
             except (ValueError, OSError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             if not deleted:
@@ -380,14 +372,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         content: str = Field(max_length=262144)
         expected_sha256: str | None = None
         create: bool = False
-        authorize_existing: bool = False
 
     class DeleteRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
         expected_sha256: str
-        authorize_existing: bool = False
 
-    def editable_project(project_id: str, authorize_existing: bool):
+    def editable_project(project_id: str):
         project = manager.get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -405,7 +395,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.put("/api/projects/{project_id}/editor/file")
     def editor_save(project_id: str, request: EditRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             return write_editable(
                 project.path,
@@ -421,7 +411,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.delete("/api/projects/{project_id}/editor/file")
     def editor_delete(project_id: str, request: DeleteRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             return delete_editable(project.path, request.path, request.expected_sha256)
         except EditConflict as exc:
@@ -432,20 +422,14 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     class EntryRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
         name: str | None = None
-        authorize_existing: StrictBool = False
         confirmed: StrictBool = False
 
     @app.patch("/api/projects/{project_id}/editor/entry")
     def editor_rename_entry(project_id: str, request: EntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             target = entry_path(project.path, request.path)
-            if project.kind.value == "existing" and (
-                target == manager.data_dir
-                or target in manager.data_dir.parents
-                or manager.data_dir in target.parents
-            ):
-                raise ExplorerError("Protected Studio data")
+            protect_studio(target)
             return rename_entry(project.path, request.path, request.name or "")
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -454,7 +438,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     class DirectoryRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
-        authorize_existing: StrictBool = False
 
     class MoveRequest(DirectoryRequest):
         parent: str = Field(max_length=500)
@@ -466,12 +449,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/editor/directory")
     def editor_create_directory(project_id: str, request: DirectoryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
-            if project.kind.value == "existing":
-                protect_studio(
-                    safe_path(project.path, request.path, allow_missing=True)
-                )
+            protect_studio(safe_path(project.path, request.path, allow_missing=True))
             return create_directory(project.path, request.path)
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -480,13 +460,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.patch("/api/projects/{project_id}/editor/move")
     def editor_move_entry(project_id: str, request: MoveRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             source = entry_path(project.path, request.path)
             destination = directory_path(project.path, request.parent) / source.name
-            if project.kind.value == "existing":
-                protect_studio(source)
-                protect_studio(destination)
+            protect_studio(source)
+            protect_studio(destination)
             if source == destination:
                 return {"path": request.path}
             return workspaces.move_resource(
@@ -500,17 +479,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.delete("/api/projects/{project_id}/editor/entry")
     def editor_delete_entry(project_id: str, request: EntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if not request.confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
             target = entry_path(project.path, request.path)
-            if project.kind.value == "existing" and (
-                target == manager.data_dir
-                or target in manager.data_dir.parents
-                or manager.data_dir in target.parents
-            ):
-                raise ExplorerError("Protected Studio data")
+            protect_studio(target)
             return delete_entry(project.path, request.path)
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -518,12 +492,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     class BatchEntryRequest(BaseModel):
         paths: list[str] = Field(min_length=1, max_length=500)
         parent: str | None = Field(default=None, max_length=500)
-        authorize_existing: StrictBool = False
         confirmed: StrictBool = False
 
     @app.post("/api/projects/{project_id}/editor/batch")
     def editor_batch(project_id: str, request: BatchEntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if request.parent is None and not request.confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
@@ -533,9 +506,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio
-                    if project.kind.value == "existing"
-                    else lambda target: None,
+                    protect_studio,
                 ),
             )
         except EditConflict as exc:
@@ -545,7 +516,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/editor/copy")
     def editor_copy(project_id: str, request: BatchEntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if request.parent is None:
             raise HTTPException(status_code=422, detail="Destination required")
         try:
@@ -555,9 +526,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio
-                    if project.kind.value == "existing"
-                    else lambda target: None,
+                    protect_studio,
                 ),
             )
         except EditConflict as exc:
@@ -684,7 +653,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     class ApplyRequest(BaseModel):
         approved: StrictBool
-        allow_existing: StrictBool = False
 
     class TestApproval(BaseModel):
         approval: str
@@ -762,9 +730,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/proposals/{proposal_id}/apply")
     def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
         try:
-            return workspaces.apply(
-                proposal_id, request.approved, request.allow_existing
-            )
+            return workspaces.apply(proposal_id, request.approved)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:

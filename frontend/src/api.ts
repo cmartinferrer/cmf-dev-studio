@@ -1,7 +1,7 @@
 import type { TerminalContext } from './terminalContext';
 export type ProjectLanguage = 'auto' | 'python' | 'java' | 'kotlin';
 export const projectLanguageLabels: Record<ProjectLanguage, string> = { auto: 'Auto', python: 'Python', java: 'Java', kotlin: 'Kotlin' };
-export type Project = { id: string; name: string; path: string; kind: 'managed' | 'existing'; description: string; created_at: string; read_only: boolean; language: ProjectLanguage };
+export type Project = { id: string; name: string; path: string; description: string; created_at: string; language: ProjectLanguage };
 export async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
   let response: Response;
   try { response = await fetch(`/api${endpoint}`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } }); }
@@ -27,8 +27,6 @@ export const readProjectFile = (projectId: string, path: string) => request<File
 
 export type FolderListing = { root: string; path: string; parent: string | null; directories: { name: string; path: string }[]; truncated: boolean };
 export const browseLocalDirectories = (path = '') => request<FolderListing>(`/local/directories?path=${encodeURIComponent(path)}`);
-export type FileSearchResult = { query: string; entries: FileEntry[]; truncated: boolean };
-export const searchProjectFiles = (projectId: string, query: string) => request<FileSearchResult>(`/projects/${encodeURIComponent(projectId)}/search?q=${encodeURIComponent(query)}`);
 
 export type RepositoryInsights = { technologies: string[]; languages: Record<string, number>; candidates: { path: string; size: number }[]; truncated: boolean; visited: number; limits: { max_files: number; max_file_bytes: number; max_total_bytes: number } };
 export type ContextPreview = { files: { path: string; content: string; size: number }[]; total_bytes: number; digest: string };
@@ -51,7 +49,7 @@ export const getProposal = (proposalId: string) => request<Proposal>(`/proposals
 export type TestPreview = {command: string[]; approval: string; working_directory: string; timeout: number};
 export const previewTest = (proposalId: string) => request<TestPreview>(`/proposals/${encodeURIComponent(proposalId)}/test`);
 export const testProposal = (proposalId: string, approval: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/test`, {method: 'POST', body: JSON.stringify({approval})});
-export const applyProposal = (proposalId: string, allowExisting: boolean) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({approved: true, allow_existing: allowExisting})});
+export const applyProposal = (proposalId: string) => request<Proposal>(`/proposals/${encodeURIComponent(proposalId)}/apply`, {method: 'POST', body: JSON.stringify({approved: true})});
 
 export type EditableFile = FilePreview & { sha256: string };
 export const openEditableFile = (projectId: string, path: string) => request<EditableFile>(`/projects/${encodeURIComponent(projectId)}/editor/file?path=${encodeURIComponent(path)}`);

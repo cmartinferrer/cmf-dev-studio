@@ -47,8 +47,8 @@ class InterruptSocket:
 
 def test_ctrl_c_interrupts_run_process_group(tmp_path, monkeypatch):
     """Ctrl+C reaches a real child even without a controlling terminal."""
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language="python")
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language="python", location=tmp_path)
     monkeypatch.setattr(
         "cmf_dev_studio.api.terminal.python_run_command",
         lambda *_: [

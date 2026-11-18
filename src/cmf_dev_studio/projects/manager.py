@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from .models import Project, ProjectKind, ProjectLanguage
+from .models import Project, ProjectLanguage
 
 _NAME_PATTERN = re.compile(r"^[\w][\w .-]{0,79}$", re.UNICODE)
 
@@ -18,29 +18,23 @@ _NAME_PATTERN = re.compile(r"^[\w][\w .-]{0,79}$", re.UNICODE)
 class ProjectManager:
     def __init__(self, data_dir: Path | str):
         self.data_dir = Path(data_dir).expanduser().resolve()
-        self.managed_dir = self.data_dir / "workspaces"
         self.db_path = self.data_dir / "projects.sqlite3"
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.managed_dir.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 path TEXT NOT NULL UNIQUE,
-                kind TEXT NOT NULL CHECK(kind IN ('managed', 'existing')),
                 description TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                language TEXT NOT NULL DEFAULT 'auto'
+                language TEXT NOT NULL DEFAULT 'auto',
+                python_interpreter TEXT, python_version TEXT, jdk_home TEXT
             )""")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
-            if "language" not in columns:
-                db.execute(
-                    "ALTER TABLE projects ADD COLUMN language TEXT NOT NULL DEFAULT 'auto'"
+            if "kind" in columns:
+                raise RuntimeError(
+                    "Legacy studio database: move the data directory before starting"
                 )
-
-            for column in ("python_interpreter", "python_version", "jdk_home"):
-                if column not in columns:
-                    db.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
@@ -62,7 +56,6 @@ class ProjectManager:
             id=row["id"],
             name=row["name"],
             path=Path(row["path"]),
-            kind=ProjectKind(row["kind"]),
             description=row["description"],
             created_at=row["created_at"],
             language=ProjectLanguage(row["language"]),
@@ -75,7 +68,6 @@ class ProjectManager:
         self,
         name: str,
         path: Path,
-        kind: ProjectKind,
         description: str,
         language: ProjectLanguage = ProjectLanguage.AUTO,
     ) -> Project:
@@ -83,7 +75,6 @@ class ProjectManager:
             id=str(uuid4()),
             name=name,
             path=path,
-            kind=kind,
             description=description,
             language=ProjectLanguage(language),
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -91,12 +82,11 @@ class ProjectManager:
         with self._connect() as db:
             try:
                 db.execute(
-                    "INSERT INTO projects (id, name, path, kind, description, created_at, language) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO projects (id, name, path, description, created_at, language) VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         project.id,
                         project.name,
                         str(project.path),
-                        project.kind.value,
                         project.description,
                         project.created_at,
                         project.language.value,
@@ -111,38 +101,30 @@ class ProjectManager:
         name: str,
         description: str = "",
         language: ProjectLanguage = ProjectLanguage.AUTO,
-        location: str | Path | None = None,
+        *,
+        location: str | Path,
     ) -> Project:
-        """Create an empty managed workspace, never replacing an existing folder."""
+        """Create an empty local project, never replacing an existing folder."""
         name = self._validate_name(name)
-        # IDs avoid collisions even for projects with identical display names.
-        project_id = uuid4().hex
-        path = (
-            self.managed_dir / project_id
-            if location is None
-            else Path(location).expanduser().resolve(strict=True) / name
-        )
-        if location is not None:
-            self._validate_root(path)
+        if not str(location).strip():
+            raise ValueError("Project location is required")
+        path = Path(location).expanduser().resolve(strict=True) / name
+        self._validate_root(path)
         path.mkdir(exist_ok=False)
         try:
-            return self._insert(
-                name, path.resolve(), ProjectKind.MANAGED, description, language
-            )
+            return self._insert(name, path.resolve(), description, language)
         except Exception:
             path.rmdir()  # Roll back only the new, still-empty directory.
             raise
 
-    def register_existing(
-        self, path: Path | str, name: str | None = None, description: str = ""
-    ) -> Project:
+    def register_existing(self, path: Path | str) -> Project:
         """Register a real directory without reading or writing its contents."""
         supplied = Path(path).expanduser()
         if not supplied.is_dir():
             raise ValueError(f"Existing project directory not found: {supplied}")
         resolved = supplied.resolve(strict=True)
         self._validate_root(resolved)
-        return self._insert(resolved.name, resolved, ProjectKind.EXISTING, "")
+        return self._insert(resolved.name, resolved, "")
 
     def get(self, project_id: str) -> Project | None:
         with self._connect() as db:
@@ -204,7 +186,7 @@ class ProjectManager:
             path == self.data_dir
             or path in self.data_dir.parents
             or self.data_dir in path.parents
-        ) and (path.parent != self.managed_dir or path.is_symlink()):
+        ):
             raise ValueError("Cannot access the studio's own data directory")
         for project in self.list_projects():
             if path == project.path:
@@ -229,7 +211,7 @@ class ProjectManager:
             if (
                 path == self.data_dir
                 or path in self.data_dir.parents
-                or (self.data_dir in path.parents and path.parent != self.managed_dir)
+                or self.data_dir in path.parents
             ):
                 raise ValueError("Cannot access the studio's own data directory")
             for other in self.list_projects():

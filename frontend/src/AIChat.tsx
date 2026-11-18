@@ -182,7 +182,7 @@ function ConversationChat({projectId,projectName,contextPaths,activePaths,dirtyP
       if(action==='tests')setSkipped(old=>[...old,id]);else setDiscarded(old=>[...old,id]);
     } catch(e){setError(String(e));}finally{setWorkingId(null);}
   }
-  async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id,true);setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
+  async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id);setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
   async function preparePython(id:string, confirmed:boolean){
     if(workingId!==null)return;
     setWorkingId(id);setError('');

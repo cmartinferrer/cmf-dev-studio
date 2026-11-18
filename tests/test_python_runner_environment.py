@@ -39,7 +39,9 @@ def test_default_python_runner(tmp_path):
 def test_interpreter_change_invalidates_approval(tmp_path, monkeypatch):
     """Require approval again when the selected interpreter changes."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample", language=ProjectLanguage.PYTHON)
+    project = manager.create(
+        "sample", language=ProjectLanguage.PYTHON, location=tmp_path
+    )
     service = WorkspaceService(manager)
     pid = "b" * 32
     workspace = service.root / pid
