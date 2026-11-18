@@ -78,7 +78,6 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
   const [error,setError]=useState('');
   const [message,setMessage]=useState('');
   const [busy,setBusy]=useState(false);
-  const [authorized,setAuthorized]=useState(false);
   const [createName,setCreateName]=useState('');
   const [createParent,setCreateParent]=useState('');
   const [revealParent,setRevealParent]=useState<{path:string}|null>(null);
@@ -104,7 +103,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     if(busy||!clipboard.length)return;
     if(tabsRef.current.some(t=>t.dirty&&clipboard.some(p=>t.path===p||t.path.startsWith(p+'/')))){setError('Save copied files before pasting');return;}
     setBusy(true);setError('');
-    try{const result=await copyEntries(project.id,clipboard,parent,authorized);setRevision(n=>n+1);setReview(null);setMessage(`Copied ${result.completed.length} items`);if(result.error)setError(result.error);}
+    try{const result=await copyEntries(project.id,clipboard,parent);setRevision(n=>n+1);setReview(null);setMessage(`Copied ${result.completed.length} items`);if(result.error)setError(result.error);}
     catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}
   }
   function rootMenu(e:React.MouseEvent){e.preventDefault();setSelection([]);anchor.current=null;setResource({name:project.name,x:e.clientX,y:e.clientY,removeLabel:'',warning:'',rename:async name=>{const updated=await renameProject(project.id,name);onProjectUpdated(updated);},newFile:()=>beginCreate('file'),newFolder:()=>beginCreate('folder'),paste:clipboard.length?()=>void paste(''):undefined});}
@@ -126,7 +125,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     try{
       const path=creationPath(createParent,createName);
       if(creating==='file'){newFile(path);return;}
-      setBusy(true);await createDirectory(project.id,path,authorized);setCreating(false);setCreateName('');setRevision(n=>n+1);setRevealParent({path:path.split('/').slice(0,-1).join('/')});setError('');
+      setBusy(true);await createDirectory(project.id,path);setCreating(false);setCreateName('');setRevision(n=>n+1);setRevealParent({path:path.split('/').slice(0,-1).join('/')});setError('');
     }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}
   }
   async function changeEntries(paths:string[],parent:string|null){
@@ -137,7 +136,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     if(parent!==null&&paths.some(p=>{const dest=(parent?parent+'/':'')+p.split('/').pop();return tabsRef.current.some(t=>!affected(t.path)&&(t.path===dest||t.path.startsWith(dest+'/')));}))throw new Error('Destination has an open editor tab');
     setBusy(true);setError('');
     try{
-      const result=await batchEntries(project.id,paths,parent,authorized);
+      const result=await batchEntries(project.id,paths,parent);
       const match=(p:string)=>result.completed.find(c=>p===c.source||p.startsWith(c.source+'/'));
       const next=(p:string)=>{const c=match(p);return c?c.path+p.slice(c.source.length):p;};
       const keep=(p:string)=>parent!==null||!match(p);
@@ -187,7 +186,7 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
   const [terminalHeight,setTerminalHeight]=useState(preferences.terminalHeight);
   useEffect(()=>{savePreferences({explorerVisible,assistantVisible,explorerWidth,assistantWidth,terminalHeight});},[explorerVisible,assistantVisible,explorerWidth,assistantWidth,terminalHeight]);
   const [review,setReview]=useState<{path:string;before:string;after:string}|null>(null);
-  useEffect(()=>{setTabs([]);setLayout(initialLayout());setReview(null);setAuthorized(false);setSelection([]);setDragged([]);setClipboard([]);anchor.current=null;},[project.id]);
+  useEffect(()=>{setTabs([]);setLayout(initialLayout());setReview(null);setSelection([]);setDragged([]);setClipboard([]);anchor.current=null;},[project.id]);
   const tabsRef=useRef(tabs);tabsRef.current=tabs;
   const activeRef=useRef(active);activeRef.current=active;
   const open=useCallback(async(path:string)=>{
@@ -199,10 +198,10 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
   const save=useCallback(async(path:string)=>{
     const tab=tabsRef.current.find(t=>t.path===path);if(!tab)return false;
     setBusy(true);setError('');
-    try{const result=await saveEditableFile(project.id,path,tab.content,tab.sha256,tab.isNew,authorized);
+    try{const result=await saveEditableFile(project.id,path,tab.content,tab.sha256,tab.isNew);
       setTabs(prev=>prev.map(t=>t.path===path?{...t,sha256:result.sha256,saved:result.content,dirty:t.content!==result.content,isNew:false}:t));setRevision(n=>n+1);if(tab.isNew)setRevealParent({path:path.split('/').slice(0,-1).join('/')});setMessage(`Saved ${path}`);return true;
     }catch(e){setError(e instanceof Error?e.message:String(e));return false;}finally{setBusy(false);}
-  },[project.id,authorized]);
+  },[project.id]);
   const saveRef=useRef(save);saveRef.current=save;
   useEffect(()=>{const handler=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(activeRef.current)void saveRef.current(activeRef.current);}};window.addEventListener('keydown',handler);return()=>window.removeEventListener('keydown',handler);},[]);
   function close(path:string,id:number){
@@ -229,9 +228,9 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     if(selection.includes(path)&&selection.length>1){deleteSelection(selection,e.clientX,e.clientY);return;}
     setSelection([path]);anchor.current=path;
     const affected=(p:string)=>p===path||p.startsWith(path+'/');
-    const check=()=>{if(busy)throw new Error('Wait for the current editor operation');if(project.read_only&&!authorized)throw new Error('Enable manual edits for this registered project first');if(tabsRef.current.some(t=>affected(t.path)&&t.dirty))throw new Error('Save or close unsaved files first');};
+    const check=()=>{if(busy)throw new Error('Wait for the current editor operation');if(tabsRef.current.some(t=>affected(t.path)&&t.dirty))throw new Error('Save or close unsaved files first');};
     const refresh=()=>{setReview(null);onApprove([],null);setRevision(n=>n+1);};
-    setResource({copy:()=>copySelection([path]),paste:clipboard.length?()=>void paste(isFile?path.split('/').slice(0,-1).join('/'):path):undefined,newFile:!isFile?()=>beginCreate('file',path):undefined,newFolder:!isFile?()=>beginCreate('folder',path):undefined,addToChat:isFile?()=>addContext(path):undefined,name:path.split('/').pop()!,x:e.clientX,y:e.clientY,removeLabel:'Delete',warning:`Permanently delete ${path}? All contents of a folder will also be deleted.`,rename:async name=>{check();const result=await renameEntry(project.id,path,name,authorized);const next=(p:string)=>affected(p)?result.path+p.slice(path.length):p;setTabs(old=>old.map(t=>({...t,path:next(t.path)})));setLayout(old=>remap(old,()=>true,next));setSelection(old=>old.map(next));anchor.current=null;refresh();},remove:async()=>{check();await changeEntries([path],null);}});
+    setResource({copy:()=>copySelection([path]),paste:clipboard.length?()=>void paste(isFile?path.split('/').slice(0,-1).join('/'):path):undefined,newFile:!isFile?()=>beginCreate('file',path):undefined,newFolder:!isFile?()=>beginCreate('folder',path):undefined,addToChat:isFile?()=>addContext(path):undefined,name:path.split('/').pop()!,x:e.clientX,y:e.clientY,removeLabel:'Delete',warning:`Permanently delete ${path}? All contents of a folder will also be deleted.`,rename:async name=>{check();const result=await renameEntry(project.id,path,name);const next=(p:string)=>affected(p)?result.path+p.slice(path.length):p;setTabs(old=>old.map(t=>({...t,path:next(t.path)})));setLayout(old=>remap(old,()=>true,next));setSelection(old=>old.map(next));anchor.current=null;refresh();},remove:async()=>{check();await changeEntries([path],null);}});
   }
   function startResize(event:React.PointerEvent<HTMLDivElement>, target:'explorer'|'assistant'|'terminal') {
     event.preventDefault();
@@ -269,7 +268,6 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
         </div></div>;})}
       </div>
       {tabMenu&&<div className="ide-tab-menu" style={{left:Math.min(tabMenu.x,window.innerWidth-160),top:Math.min(tabMenu.y,window.innerHeight-90)}}><button onClick={()=>{setLayout(old=>split(activate(old,tabMenu.path,tabMenu.id),tabMenu.path,'right'));setSplitRatio(50);setTabMenu(null);}}>Split Right</button><button onClick={()=>{setLayout(old=>split(activate(old,tabMenu.path,tabMenu.id),tabMenu.path,'down'));setSplitRatio(50);setTabMenu(null);}}>Split Down</button></div>}
-      {project.read_only&&<label className="ide-write-authorization"><input type="checkbox" checked={authorized} onChange={e=>setAuthorized(e.target.checked)}/> Allow manual edits to this registered project (writes directly to disk)</label>}
       {(error||message)&&<div className={`ide-notification ${error?'ide-error':''}`}>{error?<CircleAlert size={15}/>:<Save size={15}/>} {error||message}<button onClick={()=>{setError('');setMessage('');}}><X size={14}/></button></div>}
       {bottom&&<div className="ide-resize-horizontal" role="separator" aria-label="Resize terminal" onPointerDown={e=>startResize(e,"terminal")}/>}
       <TerminalWorkspace readers={terminalReaders} onAskAI={id=>attachTerminal(id,true)} projectId={project.id} visible={bottom} height={terminalHeight} state={terminalSessions} setState={setTerminalSessions} onHide={closeTerminal}/>
@@ -277,9 +275,9 @@ export default function IDEWorkspace({project,approved,digest,onApprove,onProjec
     </section>
     {assistantVisible&&<div className="ide-resize-handle" role="separator" aria-label="Resize AI panel" onPointerDown={e=>startResize(e,"assistant")}/>}
     {<aside className="ide-ai" style={{display:assistantVisible?undefined:'none'}}><div className="ide-ai-header"><Bot size={17}/> AI Assistant</div>
-      <div className="ide-ai-content"><AIChat onConversationChange={()=>{setReview(null);onApprove([],null);setExcluded([]);}} terminalContext={terminalContext} terminalSessions={terminalSessions.sessions} onAttachTerminal={attachTerminal} onRemoveTerminal={id=>setTerminalContext(old=>old.filter(t=>t.id!==id))} onClearTerminals={()=>setTerminalContext([])} askTerminal={askTerminal} onAskHandled={()=>setAskTerminal(0)} projectId={project.id} projectName={project.name} projectKind={project.kind} contextPaths={approved} activePaths={review?[]:visiblePaths(layout).filter(path=>tabs.some(t=>t.path===path&&!t.isNew))} dirtyPaths={tabs.filter(t=>t.dirty).map(t=>t.path)} excluded={excluded} onExclude={path=>{setExcluded(old=>[...new Set([...old,path])]);onApprove(approved.filter(p=>p!==path),null);}} onAddContext={addContext} revision={revision} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)}/></div>
+      <div className="ide-ai-content"><AIChat onConversationChange={()=>{setReview(null);onApprove([],null);setExcluded([]);}} terminalContext={terminalContext} terminalSessions={terminalSessions.sessions} onAttachTerminal={attachTerminal} onRemoveTerminal={id=>setTerminalContext(old=>old.filter(t=>t.id!==id))} onClearTerminals={()=>setTerminalContext([])} askTerminal={askTerminal} onAskHandled={()=>setAskTerminal(0)} projectId={project.id} projectName={project.name} contextPaths={approved} activePaths={review?[]:visiblePaths(layout).filter(path=>tabs.some(t=>t.path===path&&!t.isNew))} dirtyPaths={tabs.filter(t=>t.dirty).map(t=>t.path)} excluded={excluded} onExclude={path=>{setExcluded(old=>[...new Set([...old,path])]);onApprove(approved.filter(p=>p!==path),null);}} onAddContext={addContext} revision={revision} onReview={(id,change)=>void reviewChange(id,change)} onApplied={()=>setRevision(n=>n+1)}/></div>
     </aside>}
     {resource&&<ResourceActions target={resource} onClose={()=>setResource(null)}/>}
-    <WorkspaceStatusBar key={project.id} project={project} revision={revision} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)}/>
+    <WorkspaceStatusBar key={project.id} project={project} revision={revision} busy={languageBusy} onLanguageChange={value=>void changeProjectLanguage(value)} onProjectUpdated={onProjectUpdated}/>
   </div>;
 }

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Bot, History, Plus, Ellipsis, Check, ChevronRight, CircleAlert, FileCode2, LoaderCircle, Paperclip, Send, X, Terminal } from 'lucide-react';
 import { listConversations, createConversation, renameConversation, removeConversation, type ChatConversation, decideExploration, prepareProposalPython, decideGeneration, repairProposal, deferProposal, applyProposal, createProposal, getProposal, listProposals, testProposal, previewTest, type TestPreview, getRepositoryInsights, previewRepositoryContext, type RepositoryInsights, type Proposal, type ProposalChange } from './api';
 
-type Props = { onConversationChange:()=>void; terminalContext:TerminalContext[]; terminalSessions:TerminalSession[]; onAttachTerminal:(id:number)=>void; onRemoveTerminal:(id:number)=>void; onClearTerminals:()=>void; askTerminal:number; onAskHandled:()=>void; projectId: string; projectName: string; projectKind: 'managed'|'existing'; contextPaths: string[]; activePaths: string[]; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
+type Props = { onConversationChange:()=>void; terminalContext:TerminalContext[]; terminalSessions:TerminalSession[]; onAttachTerminal:(id:number)=>void; onRemoveTerminal:(id:number)=>void; onClearTerminals:()=>void; askTerminal:number; onAskHandled:()=>void; projectId: string; projectName: string; contextPaths: string[]; activePaths: string[]; dirtyPaths: string[]; excluded: string[]; onExclude:(path:string)=>void; onAddContext:(path:string)=>void; revision:number; onReview: (proposalId:string, change: ProposalChange)=>void; onApplied: ()=>void };
 const infrastructureFailure = (item:Proposal) => /infrastructure_error|^Runner infrastructure error:/.test((item.test_output??'').split('\n')[0]);
 const canRunTests = (item:Proposal) => item.status==='ready'||(item.status==='test_failed'&&infrastructureFailure(item));
 const repairCount = (item:Proposal) => item.events?.filter(e=>e.kind==='repair_requested').length??0;
@@ -38,7 +38,7 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
   return <div className="chat-dialog">
     {events.map((event,index)=>{const d=event.details;let content:React.ReactNode;
       switch(event.kind){
-        case 'assistant_response': content=assistant(<p style={{whiteSpace:'pre-wrap'}}>{d.message || t('I need permission to explore the project.','Necesito permiso para explorar el proyecto.')}</p>);break;
+        case 'assistant_response': if(d.action==='permission' && item.status==='awaiting_exploration') return null; content=assistant(<p style={{whiteSpace:'pre-wrap'}}>{d.message || t('I need permission to explore the project.','Necesito permiso para explorar el proyecto.')}</p>);break;
         case 'exploration_allowed': content=user(t('Allow exploration','Permitir exploración'));break;
         case 'exploration_denied': content=user(t('Deny exploration','Denegar exploración'));break;
         case 'files_generated': case 'repair_ready': content=assistant(<><p>{event.kind==='repair_ready'?t('I have prepared a revised proposal.','He preparado una propuesta corregida.'):t(`I have prepared ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'file':'files'} for your request.`,`He preparado ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'fichero':'ficheros'} para tu petición.`)}</p>{event.sequence===lastGenerated&&files}</>);break;
@@ -91,7 +91,7 @@ function RetryContext({item,candidates,ready,disabled,dirtyPaths,onDecision}:{it
   </div>;
 }
 
-function ConversationChat({projectId,projectName,projectKind,contextPaths,activePaths,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied,terminalContext,terminalSessions,onAttachTerminal,onRemoveTerminal,onClearTerminals,askTerminal,onAskHandled,conversationId,onBusy,onSubmitted}:Props & {conversationId:string;onBusy:(value:boolean)=>void;onSubmitted:()=>void}) {
+function ConversationChat({projectId,projectName,contextPaths,activePaths,dirtyPaths,excluded,onExclude,onAddContext,revision,onReview,onApplied,terminalContext,terminalSessions,onAttachTerminal,onRemoveTerminal,onClearTerminals,askTerminal,onAskHandled,conversationId,onBusy,onSubmitted}:Props & {conversationId:string;onBusy:(value:boolean)=>void;onSubmitted:()=>void}) {
   const [items,setItems] = useState<Proposal[]>([]);
   const [loading,setLoading]=useState(true);
   const [draft,setDraft] = useState('');
@@ -182,7 +182,7 @@ function ConversationChat({projectId,projectName,projectKind,contextPaths,active
       if(action==='tests')setSkipped(old=>[...old,id]);else setDiscarded(old=>[...old,id]);
     } catch(e){setError(String(e));}finally{setWorkingId(null);}
   }
-  async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id,projectKind==='existing');setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
+  async function apply(id:string){if(workingId!==null)return;setWorkingId(id);setError('');try{const result=await applyProposal(id,true);setItems(old=>old.map(p=>p.id===id?result:p));onApplied();}catch(e){setError(String(e));}finally{setWorkingId(null);}}
   async function preparePython(id:string, confirmed:boolean){
     if(workingId!==null)return;
     setWorkingId(id);setError('');
@@ -215,7 +215,7 @@ function ConversationChat({projectId,projectName,projectKind,contextPaths,active
             </>}
           </>:<div className="chat-inline-status">{item.status==='test_failed'?t('Repair paused.','Corrección detenida.'):t('Tests not authorized.','Tests no autorizados.')} <button className="chat-link" onClick={()=>setSkipped(old=>old.filter(id=>id!==item.id))}>{t('Request again','Solicitar de nuevo')}</button></div>)}
           {item.status==='tested'&&workingId!==item.id&&(discarded.includes(item.id)?<div className="chat-inline-status">{t('Changes not applied.','Cambios no aplicados.')} <button className="chat-link" onClick={()=>setDiscarded(old=>old.filter(id=>id!==item.id))}>{t('Review again','Revisar de nuevo')}</button></div>:<>
-            <p className="chat-action-text">{t(`Tests passed. Apply the verified changes to ${projectName}?`,`Los tests han pasado. ¿Aplico los cambios a ${projectName}?`)}{projectKind==='existing'?t(' This will write to your registered project.',' Esto escribirá en tu proyecto registrado.'):''}</p>
+            <p className="chat-action-text">{t(`Tests passed. Apply the verified changes to ${projectName}?`,`Los tests han pasado. ¿Aplico los cambios a ${projectName}?`)}{t(' This will write to disk.',' Esto escribirá en disco.')}</p>
             <div className="chat-inline-actions"><button className="chat-inline-muted" disabled={workingId!==null} onClick={()=>void defer(item.id,'apply')}>{t('Not now','Ahora no')}</button><button className="chat-inline-primary" disabled={workingId!==null} onClick={()=>void apply(item.id)}><Check size={13}/> {t('Accept changes','Aceptar cambios')}</button></div>
           </>)}
         </div>

@@ -26,7 +26,7 @@ def test_delete_managed_and_unregister_external(tmp_path):
     external.mkdir()
     (external / "main.py").write_text("keep")
     registered = manager.register_existing(external)
-    assert manager.delete(managed.id) and not managed.path.exists()
+    assert manager.delete(managed.id, from_disk=True) and not managed.path.exists()
     assert manager.delete(registered.id) and (external / "main.py").exists()
     assert manager.list_projects() == []
 
@@ -78,12 +78,6 @@ def test_api_resource_permissions(tmp_path):
         ).json()
         url = "/api/projects/" + project["id"]
         assert client.patch(url + "/name", json={"name": "Renamed"}).status_code == 200
-        assert (
-            client.patch(
-                url + "/editor/entry", json={"path": "a.py", "name": "b.py"}
-            ).status_code
-            == 403
-        )
         assert (
             client.patch(
                 url + "/editor/entry",
@@ -184,18 +178,11 @@ def test_directory_and_move_require_external_authorization(tmp_path):
             "/api/projects/register", json={"path": str(external)}
         ).json()
         url = "/api/projects/" + project["id"] + "/editor"
-        assert client.post(url + "/directory", json={"path": "src"}).status_code == 403
         assert (
             client.post(
                 url + "/directory", json={"path": "src", "authorize_existing": True}
             ).status_code
             == 200
-        )
-        assert (
-            client.patch(
-                url + "/move", json={"path": "a.py", "parent": "src"}
-            ).status_code
-            == 403
         )
         assert (
             client.patch(
@@ -261,15 +248,12 @@ def test_batch_api_confirmation_and_authorization(tmp_path):
         ).json()
         url = "/api/projects/" + project["id"] + "/editor/batch"
         payload = {"paths": ["a.py", "b.py"], "parent": None}
-        assert client.post(url, json={**payload, "confirmed": True}).status_code == 403
         assert (
             client.post(url, json={**payload, "authorize_existing": True}).status_code
             == 400
         )
         assert len(list(external.iterdir())) == 2
-        response = client.post(
-            url, json={**payload, "confirmed": True, "authorize_existing": True}
-        )
+        response = client.post(url, json={**payload, "confirmed": True})
         assert response.status_code == 200
         assert len(response.json()["completed"]) == 2
         assert not list(external.iterdir())
@@ -325,11 +309,7 @@ def test_copy_api_authorization(tmp_path):
         ).json()
         url = "/api/projects/" + project["id"] + "/editor/copy"
         payload = {"paths": ["a.py"], "parent": ""}
-        assert client.post(url, json=payload).status_code == 403
-        assert (
-            client.post(url, json={**payload, "authorize_existing": True}).status_code
-            == 200
-        )
+        assert client.post(url, json=payload).status_code == 200
         assert (external / "a (1).py").read_text() == "a"
 
 

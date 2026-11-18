@@ -29,7 +29,7 @@ def test_create_list_and_get_persisted_project(tmp_path):
         assert client.get("/api/projects").json() == [project]
 
 
-def test_register_existing_is_read_only_and_does_not_modify_files(tmp_path):
+def test_register_existing_is_editable_and_does_not_modify_files(tmp_path):
     repository = tmp_path / "repo"
     repository.mkdir()
     source = repository / "main.py"
@@ -39,7 +39,7 @@ def test_register_existing_is_read_only_and_does_not_modify_files(tmp_path):
         assert result.status_code == 201
         project = result.json()
         assert project["kind"] == "existing"
-        assert project["read_only"] is True
+        assert project["read_only"] is False
         assert project["path"] == str(repository.resolve())
     assert source.read_text() == "print('unchanged')\n"
     assert sorted(p.name for p in repository.iterdir()) == ["main.py"]
@@ -146,3 +146,52 @@ def test_api_version_matches_package_version(tmp_path):
     app = create_app(tmp_path / "studio")
 
     assert app.version == version("cmf-dev-studio")
+
+
+def test_open_project_cannot_be_removed_or_deleted(tmp_path):
+    """Both deletion modes require a closed project."""
+    with TestClient(create_app(tmp_path / "studio")) as client:
+        project = client.post(
+            "/api/projects", json={"name": "Local", "location": str(tmp_path)}
+        ).json()
+        url = "/api/projects/" + project["id"]
+        assert client.post(url + "/open").status_code == 200
+        for mode in ("false", "true"):
+            assert (
+                client.delete(url + "?confirmed=true&from_disk=" + mode).status_code
+                == 409
+            )
+        assert client.post(url + "/close").status_code == 200
+        assert client.delete(url + "?confirmed=true&from_disk=true").status_code == 200
+        assert not (tmp_path / "Local").exists()
+
+
+def test_multiple_workspace_sessions(tmp_path):
+    """Closing one browser tab cannot unlock a project in another tab."""
+    with TestClient(create_app(tmp_path / "studio")) as client:
+        project = client.post("/api/projects", json={"name": "sample"}).json()
+        url = f"/api/projects/{project['id']}"
+        for session in ("one", "two"):
+            assert (
+                client.post(url + "/open", params={"session": session}).status_code
+                == 200
+            )
+        assert client.post(url + "/close", params={"session": "one"}).status_code == 200
+        assert (
+            client.delete(
+                url, params={"confirmed": True, "from_disk": True}
+            ).status_code
+            == 409
+        )
+        assert client.post(url + "/close", params={"session": "two"}).status_code == 200
+        assert client.delete(url, params={"confirmed": True}).status_code == 200
+
+
+def test_workspace_presence_disconnect(tmp_path):
+    """A disconnected workspace releases its own presence lock."""
+    with TestClient(create_app(tmp_path / "studio")) as client:
+        project = client.post("/api/projects", json={"name": "sample"}).json()
+        url = f"/api/projects/{project['id']}"
+        with client.websocket_connect(url + "/presence?session=one"):
+            assert client.delete(url, params={"confirmed": True}).status_code == 409
+        assert client.delete(url, params={"confirmed": True}).status_code == 200

@@ -34,7 +34,7 @@ def test_register_existing_does_not_modify_files(tmp_path):
     manager = ProjectManager(tmp_path / "studio")
     project = manager.register_existing(repository)
     assert project.kind is ProjectKind.EXISTING
-    assert project.read_only
+    assert not project.read_only
     assert project.path == repository.resolve()
     assert file.read_text() == "print('hello')\n"
     assert set(repository.iterdir()) == {file}
@@ -158,3 +158,16 @@ def test_update_language_preserves_project_and_files(tmp_path, existing):
     assert manager.update_language("missing", ProjectLanguage.JAVA) is None
     with pytest.raises(ValueError):
         manager.update_language(project.id, "invalid")
+
+
+def test_local_project_lifecycle(tmp_path):
+    """Removing a project preserves files; explicit deletion removes them."""
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Local", location=tmp_path)
+    assert project.path == tmp_path / "Local"
+    (project.path / "main.py").write_text("hello")
+    assert manager.delete(project.id)
+    assert (project.path / "main.py").exists()
+    reopened = manager.register_existing(project.path)
+    assert manager.delete(reopened.id, from_disk=True)
+    assert not project.path.exists()
