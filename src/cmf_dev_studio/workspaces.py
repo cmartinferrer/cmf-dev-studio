@@ -238,6 +238,24 @@ def project_task(task: str, language: ProjectLanguage) -> str:
     )
 
 
+class MissingPatchContext(WorkspaceError):
+    """An existing patch target requires its complete approved contents."""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__(
+            f"Permission required to read and modify {path}; approve it in Context"
+        )
+
+
+class DiscoverPatchContext(RuntimeError):
+    """Return control from developer validation to the workspace coordinator."""
+
+    def __init__(self, path: str):
+        self.path = path
+        super().__init__(path)
+
+
 def validate_operations(
     operations: object, original: dict[str, bytes], approved_paths: set[str]
 ) -> None:
@@ -263,9 +281,7 @@ def validate_operations(
         if action in ("modify", "delete") and not existing:
             raise WorkspaceError(f"{path} does not exist: use create")
         if action in ("modify", "delete") and path not in approved_paths:
-            raise WorkspaceError(
-                f"Permission required to read and modify {path}; approve it in Context"
-            )
+            raise MissingPatchContext(path)
         if action not in ("create", "modify", "delete"):
             raise WorkspaceError(f"Unsupported action: {action}")
         content = op.get("content", "")
@@ -1298,6 +1314,25 @@ class WorkspaceService:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
+    def _record_context_tool(self, proposal_id, action, query):
+        with self._db() as db:
+            self._event(db, proposal_id, "exploration_tool", stage=action, query=query)
+
+    def _save_discovered_context(self, proposal_id, action, message, discovered):
+        with self._db() as db:
+            self._event(
+                db,
+                proposal_id,
+                "investigation_completed",
+                action=action,
+                message=message,
+                paths=list(discovered),
+            )
+            db.execute(
+                "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
+                (json.dumps(list(discovered)), proposal_id),
+            )
+
     def _generate(
         self, proposal_id: str, task: str, context: dict, original: dict[str, bytes]
     ):
@@ -1367,18 +1402,104 @@ class WorkspaceService:
                 task += "\nInvestigation findings (verify against source): " + message
                 if action == "quick_patch":
                     options.update(quick=True, diagnosis=message)
-            operations = engine.prepare(
-                task,
-                inventory,
-                approved,
-                languages,
-                original,
-                approved_paths,
-                lambda ops: validate_operations(ops, original, approved_paths),
-                lambda stage: self._stage(proposal_id, stage),
-                lambda plan: self._stage(proposal_id, "developer", plan=plan),
-                **options,
-            )
+
+            def validate(ops):
+                try:
+                    validate_operations(ops, original, approved_paths)
+                except MissingPatchContext as exc:
+                    if not row["assistant_language"]:
+                        raise
+                    raise DiscoverPatchContext(exc.path) from exc
+
+            if row["assistant_language"]:
+                investigator = Investigator(
+                    client,
+                    original,
+                    discovered,
+                    any(e["kind"] == "exploration_allowed" for e in row["events"]),
+                    lambda action, query: self._record_context_tool(
+                        proposal_id, action, query
+                    ),
+                )
+
+                def expand_context(path):
+                    investigator.tool("read", path)
+                    if path not in investigator.approved:
+                        raise WorkspaceError(
+                            "Additional context unavailable, excluded or over budget"
+                        )
+                    approved_paths.update(investigator.approved)
+                    self._save_discovered_context(
+                        proposal_id, action, message, investigator.approved
+                    )
+                    return with_terminal_context(
+                        "\n\n".join(
+                            f"FILE: {p}\n{v}" for p, v in investigator.approved.items()
+                        ),
+                        row["terminal_context"],
+                    )
+
+                pending = next(
+                    (
+                        e["details"]["path"]
+                        for e in reversed(row["events"])
+                        if e["kind"] == "context_required"
+                    ),
+                    None,
+                )
+                if (
+                    completed
+                    and pending
+                    and pending not in approved_paths
+                    and investigator.allowed
+                ):
+                    approved = expand_context(pending)
+            for expansion in range(4):
+                try:
+                    operations = engine.prepare(
+                        task,
+                        inventory,
+                        approved,
+                        languages,
+                        original,
+                        approved_paths,
+                        validate,
+                        lambda stage: self._stage(proposal_id, stage),
+                        lambda plan: self._stage(proposal_id, "developer", plan=plan),
+                        **options,
+                    )
+                    break
+                except DiscoverPatchContext as exc:
+                    if expansion == 3:
+                        raise WorkspaceError(
+                            "Additional context discovery limit reached"
+                        ) from exc
+                    if not investigator.eligible(exc.path):
+                        raise WorkspaceError(
+                            "Additional context unavailable or excluded"
+                        ) from exc
+                    if not investigator.allowed:
+                        with self._db() as db:
+                            self._event(
+                                db, proposal_id, "context_required", path=exc.path
+                            )
+                            self._event(
+                                db,
+                                proposal_id,
+                                "assistant_response",
+                                action="permission",
+                                message=(
+                                    f"Necesito consultar {exc.path} para completar los cambios."
+                                    if row["assistant_language"] == "Spanish"
+                                    else f"I need to inspect {exc.path} to complete the changes."
+                                ),
+                            )
+                        self._update(proposal_id, "awaiting_exploration")
+                        return
+                    approved = expand_context(exc.path)
+                    options["feedback"] = (
+                        "Additional approved context is now available. Replan against it."
+                    )
             changes = self._write_operations(proposal_id, operations, original)
             self._update(proposal_id, "ready", changes=changes)
             self._stage(proposal_id, "awaiting_tests")

@@ -163,7 +163,7 @@ class Investigator:
                 "and compare alternatives in terms of the actual project contract. "
                 "If evidence is incomplete, say what is unverified and request exploration if needed. "
                 "Use answer for explanations, question for genuine unresolved user choices, patch only when "
-                "the user requests changes. Use quick_patch for a localized, low-risk correction with known behavior, otherwise patch for new features or complex changes. For either, explain the cause and solution. Search references and tests when intended behavior is unclear; ask rather than invent behavior. "
+                "the user requests changes. Use quick_patch for a localized, low-risk correction with known behavior, otherwise patch for new features or complex changes. For either, explain the cause and solution. For requested code changes, locate relevant existing tests and read those that may need changes before proposing a patch. Search references and tests when intended behavior is unclear; ask rather than invent behavior. "
                 "Do not invent missing business behavior, return values or public APIs merely to make code compile. "
                 "If references and tests do not establish intended behavior, ask a focused question. "
                 "Describe proposed changes as proposals, not as completed work. "
