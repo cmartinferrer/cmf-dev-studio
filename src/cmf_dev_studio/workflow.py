@@ -86,3 +86,17 @@ def test_quality_guidance() -> str:
         "expectation contradicts the original requirements. Prefer existing test conventions "
         "and the smallest sufficient suite; no arbitrary coverage percentage or unrelated tests."
     )
+
+
+def code_awareness_guidance() -> str:
+    """Shared evidence and scope policy for repository changes."""
+    return (
+        "Infer naming, architecture, reusable helpers and test conventions from "
+        "approved source, not filenames or language stereotypes. Respect explicit "
+        "user conventions for new code even if existing code differs. Reuse existing "
+        "implementations when appropriate. Before changing a public symbol or contract, "
+        "identify callers, imports, exports and tests; do not assume references are "
+        "complete without evidence. Preserve existing behavior and unrelated code. "
+        "Treat optional consistency improvements as separate from required changes; "
+        "do not silently rename or refactor unrelated existing symbols."
+    )

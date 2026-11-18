@@ -8,7 +8,11 @@ from cmf_dev_studio.contracts import (
     structured_response,
 )
 from cmf_dev_studio.llm.client import LLMClient
-from cmf_dev_studio.workflow import acceptance_guidance, test_quality_guidance
+from cmf_dev_studio.workflow import (
+    acceptance_guidance,
+    code_awareness_guidance,
+    test_quality_guidance,
+)
 
 
 class AnalystAgent:
@@ -26,6 +30,8 @@ class AnalystAgent:
             "An empty inventory means a new project: plan implementation, build configuration and tests from the task without requiring existing files. "
             "New files do not require approved context. "
             'Return JSON {"requirements": ["..."], "acceptance": ["..."]}. '
+            + code_awareness_guidance()
+            + "\n"
             + acceptance_guidance()
             + " "
             + test_quality_guidance()

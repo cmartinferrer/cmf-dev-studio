@@ -10,7 +10,11 @@ from cmf_dev_studio.contracts import (
     structured_response,
 )
 from cmf_dev_studio.llm.client import LLMClient
-from cmf_dev_studio.workflow import acceptance_guidance, test_quality_guidance
+from cmf_dev_studio.workflow import (
+    acceptance_guidance,
+    code_awareness_guidance,
+    test_quality_guidance,
+)
 
 
 class DeveloperAgent:
@@ -44,6 +48,7 @@ class DeveloperAgent:
             + "Implement the original task as well as the plan. Never remove required behavior, replace integrations with placeholders, swallow missing dependencies, or weaken valid tests to pass a repair. Declare required dependencies using project conventions. "
             "Do not generate self-referential or tautological assertions. Preserve conventional indentation, blank lines and real line breaks in every source and build file. Encode line breaks as JSON newline escapes, never flatten or minify code. Check imports and syntax; Java static imports must begin with import static. For new Maven projects specify compatible Java release and explicit compiler and test plugin versions. Preserve existing build conventions.\n"
         )
+        instructions += "\nCODE AWARENESS: " + code_awareness_guidance() + "\n"
         instructions += "\nTEST QUALITY: " + test_quality_guidance() + "\n"
         last_error = ""
         for attempt in range(max_attempts):
