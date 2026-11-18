@@ -13,6 +13,8 @@ from cmf_dev_studio.llm.client import LLMClient
 from cmf_dev_studio.workflow import (
     acceptance_guidance,
     code_awareness_guidance,
+    normalize_recommendation,
+    recommendation_guidance,
     test_quality_guidance,
 )
 
@@ -20,6 +22,7 @@ from cmf_dev_studio.workflow import (
 class DeveloperAgent:
     def __init__(self, llm: LLMClient):
         self.llm = llm
+        self.recommendation = ""
 
     def generate_patch(
         self,
@@ -31,6 +34,7 @@ class DeveloperAgent:
         quick: bool = False,
         validate: Callable[[object], None],
     ) -> list[dict]:
+        self.recommendation = ""
         test_instruction = (
             "\nFor this localized correction, preserve existing tests. Add a regression test only if needed and exercise the actual production entry point. Do not invent behavior or unrelated tests. "
             if quick
@@ -50,6 +54,7 @@ class DeveloperAgent:
         )
         instructions += "\nCODE AWARENESS: " + code_awareness_guidance() + "\n"
         instructions += "\nTEST QUALITY: " + test_quality_guidance() + "\n"
+        instructions += "\nOPTIONAL ADVICE: " + recommendation_guidance() + "\n"
         last_error = ""
         for attempt in range(max_attempts):
             request = prompt + instructions
@@ -65,10 +70,13 @@ class DeveloperAgent:
                     + "\nReturn corrected JSON without expanding permissions."
                 )
             try:
-                request += '\nFINAL OUTPUT CONTRACT: Return exactly one JSON object {"operations": [{"action": "create", "path": "relative/path", "content": "complete file content"}]}. Never return a bare array, source code, or prose. Choose the action according to the inventory and approved context. For delete use empty content.\n'
+                request += '\nFINAL OUTPUT CONTRACT: Return exactly one JSON object {"recommendation": "", "operations": [{"action": "create", "path": "relative/path", "content": "complete file content"}]}. Never return a bare array, source code, or prose. Choose the action according to the inventory and approved context. For delete use empty content.\n'
                 parsed = structured_response(self.llm, request, PATCH_SCHEMA)
                 operations = parsed["operations"]
                 validate(operations)
+                self.recommendation = normalize_recommendation(
+                    parsed.get("recommendation")
+                )
                 return operations
             except (ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc)[:240]

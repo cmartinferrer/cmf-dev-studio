@@ -17,8 +17,9 @@ __all__ = ["Orchestrator", "Plan"]
 
 
 class Orchestrator:
-    def __init__(self, llm, policy=None):
+    def __init__(self, llm, policy=None, *, on_recommendation=None):
         self.policy = policy or WorkflowPolicy()
+        self.on_recommendation = on_recommendation or (lambda _: None)
         self.analyst = AnalystAgent(llm)
         self.developer = DeveloperAgent(llm)
         self.tester = TesterAgent(llm)
@@ -101,6 +102,7 @@ class Orchestrator:
                 request, plan, feedback=feedback, validate=validate, quick=quick
             )
             if quick:
+                self.on_recommendation(self.developer.recommendation)
                 return operations
             previous = operations
             stage("tester")
@@ -108,6 +110,9 @@ class Orchestrator:
                 task, plan, operations, original=original, approved_paths=approved_paths
             )
             if not issues:
+                self.on_recommendation(
+                    self.tester.recommendation or self.developer.recommendation
+                )
                 return operations
             feedback += "\nTester review: " + "; ".join(issues)
         raise ValueError("Tester review unresolved: " + "; ".join(issues))

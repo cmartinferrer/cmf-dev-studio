@@ -108,7 +108,7 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
     attempts = []
 
     class Engine:
-        def __init__(self, client):
+        def __init__(self, client, *, on_recommendation=None):
             pass
 
         def prepare(

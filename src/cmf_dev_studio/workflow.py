@@ -88,6 +88,26 @@ def test_quality_guidance() -> str:
     )
 
 
+def recommendation_guidance() -> str:
+    """Evaluate optional improvements without expanding the requested patch."""
+    return (
+        "Explicitly evaluate the approved code for one concrete optional improvement "
+        "directly related to the task. Compare existing sibling symbols with the "
+        "requested naming and style; consider reuse, duplication and related test gaps. "
+        "For example, if new methods must follow a naming convention and an existing "
+        "peer violates it, recommend aligning that peer, citing its actual name. "
+        "Return recommendation as a concise string naming the affected symbol or file "
+        "and explaining why; return an empty string only if no relevant evidence exists. "
+        "Use the user's language. Never implement optional advice, add it to requirements "
+        "or report it as a blocking issue. Do not explore solely to find advice."
+    )
+
+
+def normalize_recommendation(value: object) -> str:
+    """Ignore malformed optional advice without rejecting the main response."""
+    return value.strip()[:600] if isinstance(value, str) else ""
+
+
 def code_awareness_guidance() -> str:
     """Shared evidence and scope policy for repository changes."""
     return (

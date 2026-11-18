@@ -20,6 +20,7 @@ def parse_json(text: str) -> dict:
 PATCH_SCHEMA = {
     "type": "object",
     "properties": {
+        "recommendation": {"type": "string"},
         "operations": {
             "type": "array",
             "items": {
@@ -34,9 +35,9 @@ PATCH_SCHEMA = {
                 },
                 "required": ["action", "path", "content"],
             },
-        }
+        },
     },
-    "required": ["operations"],
+    "required": ["operations", "recommendation"],
 }
 PLAN_SCHEMA = {
     "type": "object",
@@ -48,8 +49,11 @@ PLAN_SCHEMA = {
 }
 REVIEW_SCHEMA = {
     "type": "object",
-    "properties": {"issues": {"type": "array", "items": {"type": "string"}}},
-    "required": ["issues"],
+    "properties": {
+        "issues": {"type": "array", "items": {"type": "string"}},
+        "recommendation": {"type": "string"},
+    },
+    "required": ["issues", "recommendation"],
 }
 
 

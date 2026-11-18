@@ -39,6 +39,7 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
     {events.map((event,index)=>{const d=event.details;let content:React.ReactNode;
       switch(event.kind){
         case 'assistant_response':  content=assistant(<p style={{whiteSpace:'pre-wrap'}}>{d.message || t('I need permission to explore the project.','Necesito permiso para explorar el proyecto.')}</p>);break;
+        case 'assistant_recommendation': content=assistant(<><p><strong>{t('Optional recommendation','Recomendación opcional')}</strong></p><p style={{whiteSpace:'pre-wrap'}}>{d.message}</p><p>{t('Optional follow-up. Ask me if you want to implement it.','Mejora opcional para más adelante. Pídemelo si quieres implementarla.')}</p></>);break;
         case 'exploration_allowed': content=user(t('Allow exploration','Permitir exploración'));break;
         case 'exploration_denied': content=user(t('Deny exploration','Denegar exploración'));break;
         case 'files_generated': case 'repair_ready': content=assistant(<><p>{event.kind==='repair_ready'?t('I have prepared a revised proposal.','He preparado una propuesta corregida.'):t(`I have prepared ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'file':'files'} for your request.`,`He preparado ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'fichero':'ficheros'} para tu petición.`)}</p>{event.sequence===lastGenerated&&files}</>);break;

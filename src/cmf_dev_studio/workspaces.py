@@ -831,6 +831,21 @@ class WorkspaceService:
             )
         return history
 
+    def _record_recommendation(self, proposal_id, message):
+        """Persist at most one optional recommendation per proposal, across retries."""
+        if not message:
+            return
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            exists = db.execute(
+                "SELECT 1 FROM proposal_events WHERE proposal_id=? AND kind=?",
+                (proposal_id, "assistant_recommendation"),
+            ).fetchone()
+            if not exists:
+                self._event(
+                    db, proposal_id, "assistant_recommendation", message=message
+                )
+
     def _investigate(self, proposal_id, client, task, context, original, row):
         def activity(action, query):
             with self._db() as db:
@@ -849,6 +864,8 @@ class WorkspaceService:
         action, message = investigator.run(
             task, row["terminal_context"], row["assistant_language"], history
         )
+        if action in ("patch", "quick_patch"):
+            self._record_recommendation(proposal_id, investigator.recommendation)
         with self._db() as db:
             self._event(
                 db, proposal_id, "assistant_response", message=message, action=action
@@ -1218,7 +1235,12 @@ class WorkspaceService:
             from cmf_dev_studio.llm.gemini import GeminiClient
 
             load_dotenv()
-            engine = Orchestrator(GeminiClient())
+            engine = Orchestrator(
+                GeminiClient(),
+                on_recommendation=lambda message: self._record_recommendation(
+                    proposal_id, message
+                ),
+            )
             project = self.manager.get(row["project_id"])
             if project is None:
                 raise WorkspaceError("Project not found")
@@ -1344,7 +1366,12 @@ class WorkspaceService:
 
             load_dotenv()
             client = GeminiClient()
-            engine = Orchestrator(client)
+            engine = Orchestrator(
+                client,
+                on_recommendation=lambda message: self._record_recommendation(
+                    proposal_id, message
+                ),
+            )
             inventory = "\n".join(sorted(original))[:12000]
             approved = "\n\n".join(
                 f"FILE: {f['path']}\n{f['content']}" for f in context["files"]
