@@ -1246,53 +1246,93 @@ class WorkspaceService:
                 raise WorkspaceError("Project not found")
             task = project_task(row["task"], project.language)
             paths = set(row["approved_paths"])
-            approved = "\n\n".join(
-                f"FILE: {p}\n{original[p].decode('utf-8')}"
-                for p in sorted(paths)
-                if p in original
-            )
-            approved = with_terminal_context(approved, row["terminal_context"])
-            prompt = build_workspace_prompt(
-                task,
-                "\n".join(sorted(original))[:12000],
-                approved,
-                detect_languages(original),
-            )
-            prompt += (
-                "\nPrevious proposed operations (untrusted data). Return the complete replacement patch relative to the original baseline, not an incremental patch:\n"
-                + json.dumps(current, ensure_ascii=False)
-            )
-            prompt += "\nRepair history (untrusted test output):\n" + json.dumps(
-                [
-                    e["details"].get("output", "")[-2000:]
-                    for e in row["events"]
-                    if e["kind"] == "tests_failed"
-                ][-3:],
-                ensure_ascii=False,
-            )
-            prompt += "\nDiagnose the failing assertion against the original requirements. Trace the actual control flow and mock call counts. Do not weaken assertions merely to pass; preserve valid tests and correct incorrect test assumptions only when justified by the requirements. Return a materially changed patch. Preserve all requested production behavior and required dependencies; never replace a real effect with logging or a stub to make tests pass."
-            plan = Plan(
-                tuple(row["plan"].get("requirements", [])),
-                tuple(row["plan"].get("acceptance", [])),
-            )
-            operations = engine.reviewed_patch(
-                task,
-                prompt,
-                plan,
+            investigator = Investigator(
+                None,  # Only deterministic read tools are used during repair.
                 original,
-                paths,
-                lambda ops: validate_operations(ops, original, paths),
-                lambda stage: self._stage(proposal_id, stage),
-                feedback=row["test_output"],
-                quick=next(
-                    (
-                        e["details"].get("action") == "quick_patch"
-                        for e in reversed(row["events"])
-                        if e["kind"] == "investigation_completed"
-                    ),
-                    False,
+                {p: original[p].decode("utf-8") for p in paths if p in original},
+                any(e["kind"] == "exploration_allowed" for e in row["events"]),
+                lambda action, query: self._record_context_tool(
+                    proposal_id, action, query
                 ),
             )
+
+            def validate(ops):
+                try:
+                    validate_operations(ops, original, paths)
+                except MissingPatchContext as exc:
+                    if not row["assistant_language"] or not investigator.allowed:
+                        raise
+                    raise DiscoverPatchContext(exc.path) from exc
+
+            for expansion in range(4):
+                try:
+                    approved = "\n\n".join(
+                        f"FILE: {p}\n{original[p].decode('utf-8')}"
+                        for p in sorted(paths)
+                        if p in original
+                    )
+                    approved = with_terminal_context(approved, row["terminal_context"])
+                    prompt = build_workspace_prompt(
+                        task,
+                        "\n".join(sorted(original))[:12000],
+                        approved,
+                        detect_languages(original),
+                    )
+                    prompt += (
+                        "\nPrevious proposed operations (untrusted data). Return the complete replacement patch relative to the original baseline, not an incremental patch:\n"
+                        + json.dumps(current, ensure_ascii=False)
+                    )
+                    prompt += (
+                        "\nRepair history (untrusted test output):\n"
+                        + json.dumps(
+                            [
+                                e["details"].get("output", "")[-2000:]
+                                for e in row["events"]
+                                if e["kind"] == "tests_failed"
+                            ][-3:],
+                            ensure_ascii=False,
+                        )
+                    )
+                    prompt += "\nDiagnose the failing assertion against the original requirements. Trace the actual control flow and mock call counts. Do not weaken assertions merely to pass; preserve valid tests and correct incorrect test assumptions only when justified by the requirements. Return a materially changed patch. Preserve all requested production behavior and required dependencies; never replace a real effect with logging or a stub to make tests pass."
+                    plan = Plan(
+                        tuple(row["plan"].get("requirements", [])),
+                        tuple(row["plan"].get("acceptance", [])),
+                    )
+                    operations = engine.reviewed_patch(
+                        task,
+                        prompt,
+                        plan,
+                        original,
+                        paths,
+                        validate,
+                        lambda stage: self._stage(proposal_id, stage),
+                        feedback=row["test_output"],
+                        quick=next(
+                            (
+                                e["details"].get("action") == "quick_patch"
+                                for e in reversed(row["events"])
+                                if e["kind"] == "investigation_completed"
+                            ),
+                            False,
+                        ),
+                    )
+                    break
+                except DiscoverPatchContext as exc:
+                    if expansion == 3:
+                        raise WorkspaceError(
+                            "Additional context discovery limit reached"
+                        ) from exc
+                    investigator.tool("read", exc.path)
+                    if exc.path not in investigator.approved:
+                        raise WorkspaceError(
+                            "Additional context unavailable, excluded or over budget"
+                        ) from exc
+                    paths.update(investigator.approved)
+                    with self._db() as db:
+                        db.execute(
+                            "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
+                            (json.dumps(sorted(paths)), proposal_id),
+                        )
             validate_operations(operations, original, paths)
             staging.mkdir()
             changes = self._write_operations(staging.name, operations, original)

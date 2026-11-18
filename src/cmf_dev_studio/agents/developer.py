@@ -19,6 +19,10 @@ from cmf_dev_studio.workflow import (
 )
 
 
+class PatchGenerationError(ValueError):
+    """The model exhausted structural patch validation attempts."""
+
+
 class DeveloperAgent:
     def __init__(self, llm: LLMClient):
         self.llm = llm
@@ -80,7 +84,7 @@ class DeveloperAgent:
                 return operations
             except (ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc)[:240]
-        raise ValueError("Could not generate a safe patch: " + last_error)
+        raise PatchGenerationError("Could not generate a safe patch: " + last_error)
 
 
 def build_workspace_prompt(
