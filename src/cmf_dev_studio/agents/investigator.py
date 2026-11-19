@@ -6,6 +6,7 @@ import json
 import logging
 
 from cmf_dev_studio.contracts import structured_response
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.tools.builtins import repository_registry
 from cmf_dev_studio.tools.context import ToolContext
 from cmf_dev_studio.tools.executor import ToolExecutor
@@ -33,9 +34,21 @@ SCHEMA = {
         },
         "query": {"type": "string"},
         "recommendation": {"type": "string"},
+        "applying_recommendation": {"type": "boolean"},
+        "request_intent": {
+            "type": "string",
+            "enum": ["new", "historical_advice", "mixed", "non_patch"],
+        },
         "message": {"type": "string"},
     },
-    "required": ["action", "query", "message", "recommendation"],
+    "required": [
+        "action",
+        "query",
+        "message",
+        "recommendation",
+        "applying_recommendation",
+        "request_intent",
+    ],
 }
 MAX_ROUNDS = 8
 LOGGER = logging.getLogger("uvicorn.error.cmf.investigator")
@@ -44,13 +57,15 @@ LOGGER = logging.getLogger("uvicorn.error.cmf.investigator")
 class Investigator:
     """Let the model choose evidence, without granting filesystem or shell access."""
 
-    def __init__(self, llm, original, approved, allowed, activity):
+    def __init__(self, llm, original, approved, allowed, activity, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
         self.context = ToolContext(
             RepositorySnapshot(original), approved, allowed, activity
         )
         self.executor = ToolExecutor(repository_registry())
         self.recommendation = ""
+        self.applying_recommendation = False
 
     @property
     def approved(self):
@@ -68,6 +83,7 @@ class Investigator:
 
     def run(self, task, evidence, language, history):
         self.recommendation = ""
+        self.applying_recommendation = False
         transcript = []
         LOGGER.info("Investigation started: authorized=%s", self.allowed)
         for round_number in range(MAX_ROUNDS):
@@ -86,6 +102,9 @@ class Investigator:
                 "Resolve follow-up requests referring to prior advice or tasks from history; "
                 "when the reference is clear, treat the selected advice as the current requested change, "
                 "verify it against current files and include its concrete requirements in the handoff. "
+                "Set applying_recommendation=true whenever ANY part of the current patch applies historical advice, including mixed requests with additional new work. "
+                "Set it false only for entirely new tasks or non-patch requests. A new requirement never cancels the historical-advice flag. "
+                "Classify request_intent as mixed when historical advice and new work coexist, historical_advice when only advice is applied, new for independent work, or non_patch otherwise. Recognize semantic references in any language, including requests that paraphrase the advice. "
                 "Never apply unrelated historical advice; ask only when the reference is genuinely ambiguous. "
                 "For current behavior, read any required dependency absent from current context; "
                 "request permission first if necessary. Never infer its implementation from an old task. "
@@ -94,7 +113,7 @@ class Investigator:
                 "If evidence is incomplete, say what is unverified and request exploration if needed. "
                 "Use answer for explanations, question for genuine unresolved user choices, patch only when "
                 "the user requests changes. Use quick_patch for a localized, low-risk correction with known behavior, otherwise patch for new features or complex changes. For either, explain the cause and solution. For requested code changes, locate relevant existing tests and read those that may need changes before proposing a patch. Search references and tests when intended behavior is unclear; ask rather than invent behavior. "
-                "For code changes, inspect nearby implementations and existing test patterns when relevant. "
+                "When adding or changing tests, read the actual implementation under test, not just the test file, before handing off; this is needed for correctness and security review. For code changes, inspect nearby implementations and existing test patterns when relevant. "
                 "For requested renames or contract changes, search for references and read affected files before delegating. "
                 "Use targeted searches; do not explore unrelated files or repeat known reads. "
                 "Do not invent missing business behavior, return values or public APIs merely to make code compile. "
@@ -125,6 +144,7 @@ class Investigator:
                     ensure_ascii=False,
                 )
             )
+            prompt += self.skills.guidance("investigator", task)
             response = structured_response(self.llm, prompt, SCHEMA)
             action, query, message = (
                 response.get(k, "") for k in ("action", "query", "message")
@@ -149,6 +169,15 @@ class Investigator:
                 suggestion = response.get("recommendation", "")
                 if action in {"patch", "quick_patch"} and isinstance(suggestion, str):
                     self.recommendation = suggestion.strip()[:600]
+                self.applying_recommendation = (
+                    action in {"patch", "quick_patch"}
+                    and (
+                        response.get("applying_recommendation") is True
+                        or response.get("request_intent")
+                        in ("historical_advice", "mixed")
+                    )
+                    and any(entry.get("recommendation") for entry in history)
+                )
                 LOGGER.info("Investigation completed: %s", action)
                 return action, message
             if action == "permission" and self.allowed:

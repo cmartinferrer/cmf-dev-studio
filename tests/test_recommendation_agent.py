@@ -19,7 +19,10 @@ class Model:
         if self.fail:
             raise RuntimeError("Unavailable")
         return json.dumps(
-            {"recommendation": "Rename multiplicar to multiply in calc.py"}
+            {
+                "recommendation": "Rename multiplicar to multiply in calc.py",
+                "critical": "",
+            }
         )
 
 
@@ -56,7 +59,7 @@ def test_independent_review_runs_even_without_candidates(monkeypatch, quick):
 def test_failure_is_nonblocking():
     """Provider failures do not invalidate the requested change."""
     agent = RecommendationAgent(Model(fail=True))
-    assert agent.review("task", Plan((), ()), [], {}, set(), []) == ""
+    assert agent.review("task", Plan((), ()), [], {}, set(), []).status == "failed"
 
 
 def test_deleted_file_is_not_reviewed():
@@ -72,3 +75,32 @@ def test_deleted_file_is_not_reviewed():
     )
     assert "obsolete_marker" not in model.prompts[0]
     assert "hidden_marker" not in model.prompts[0]
+
+
+def test_critical_review_keeps_skills_and_inspects_final_entry_points():
+    """Keep skill guidance and independent security checks in critical-only mode."""
+    from cmf_dev_studio.skills.registry import SkillContext
+
+    activity = []
+    model = Model()
+    agent = RecommendationAgent(
+        model, skills=SkillContext(activity=lambda *args: activity.append(args))
+    )
+    result = agent.review(
+        "Apply previous advice",
+        Plan((), ()),
+        [{"action": "modify", "path": "cli.py", "content": "evaluate(user_input)"}],
+        {"calc.py": b"def evaluate(x): return eval(x)", "secret.py": b"private_marker"},
+        {"calc.py"},
+        [],
+        critical_only=True,
+    )
+    assert len(model.prompts) == 1
+    prompt = model.prompts[0]
+    assert "return eval(x)" in prompt
+    assert "evaluate(user_input)" in prompt
+    assert "private_marker" not in prompt
+    assert "dynamic code" in prompt
+    assert "suppress optional advice only" in prompt
+    assert any(role == "recommendation" for role, _ in activity)
+    assert result.optional == ""

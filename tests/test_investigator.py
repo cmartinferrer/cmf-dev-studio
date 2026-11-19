@@ -109,7 +109,13 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
 
     class Engine:
         def __init__(
-            self, client, *, on_recommendation=None, independent_recommendations=False
+            self,
+            client,
+            *,
+            on_recommendation=None,
+            independent_recommendations=False,
+            skills=None,
+            on_critical_recommendation=None,
         ):
             assert independent_recommendations is True
 
@@ -157,6 +163,10 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
     ).json()
     assert row["status"] == "awaiting_exploration"
     assert row["approved_paths"] == []
+    assert any(
+        e["kind"] == "skill_selected" and e["details"]["stage"] == "investigator"
+        for e in row["events"]
+    )
     result = client.post(
         f"/api/proposals/{row['id']}/exploration-decision", json={"allow": True}
     ).json()
