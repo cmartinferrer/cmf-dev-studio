@@ -60,7 +60,12 @@ def test_api_passes_terminal_evidence_to_agents(tmp_path, monkeypatch):
 
     class FakeEngine:
         def __init__(
-            self, client, *, on_recommendation=None, independent_recommendations=False
+            self,
+            client,
+            *,
+            on_recommendation=None,
+            independent_recommendations=False,
+            skills=None,
         ):
             assert independent_recommendations is True
 

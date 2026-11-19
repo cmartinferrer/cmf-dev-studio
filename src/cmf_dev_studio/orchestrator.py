@@ -17,6 +17,7 @@ from cmf_dev_studio.agents.recommendation import RecommendationAgent
 from cmf_dev_studio.agents.tester import TesterAgent
 from cmf_dev_studio.contracts import Plan
 from cmf_dev_studio.recommendations import RecommendationContext
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.workflow import WorkflowPolicy
 
 __all__ = ["Orchestrator", "Plan"]
@@ -30,14 +31,18 @@ class Orchestrator:
         *,
         on_recommendation=None,
         independent_recommendations=False,
+        skills=None,
     ):
         self.policy = policy or WorkflowPolicy()
         self.on_recommendation = on_recommendation or (lambda _: None)
-        self.analyst = AnalystAgent(llm)
-        self.developer = DeveloperAgent(llm)
-        self.tester = TesterAgent(llm)
+        skills = skills if skills is not None else SkillContext()
+        self.analyst = AnalystAgent(llm, skills=skills)
+        self.developer = DeveloperAgent(llm, skills=skills)
+        self.tester = TesterAgent(llm, skills=skills)
         self.recommender = (
-            RecommendationAgent(llm) if independent_recommendations else None
+            RecommendationAgent(llm, skills=skills)
+            if independent_recommendations
+            else None
         )
 
     def plan_patch(self, *args, **kwargs):

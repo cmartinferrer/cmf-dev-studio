@@ -67,7 +67,7 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
     {!generated.length&&item.changes.length>0&&assistant(files)}
     {!events.some(e=>e.kind==='tests_passed'||e.kind==='tests_failed')&&item.test_output&&assistant(<><p>{item.status==='test_failed'?t('The tests failed.','Los tests han fallado.'):t('Test result','Resultado de los tests')}</p>{output(item.test_output)}</>)}
     {item.status==='applied'&&!events.some(e=>e.kind==='changes_applied')&&assistant(<p>{t('The changes are saved.','Los cambios están guardados.')}</p>)}
-    {!!item.events?.some(e=>['agent_stage','exploration_tool'].includes(e.kind))&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>['agent_stage','exploration_tool'].includes(e.kind)).map(e=><div key={e.sequence}>{e.details.stage} {e.details.query} · {chatTime(e.created_at,true)}</div>)}</details>}
+    {!!item.events?.some(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind))&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind)).map(e=><div key={e.sequence}>{e.kind==='skill_selected'?`${t('Skills','Skills')}: `:''}{e.details.stage} {e.details.query} · {chatTime(e.created_at,true)}</div>)}</details>}
   </div>;
 }
 

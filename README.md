@@ -422,3 +422,7 @@ Copyright © 2026 Cristian Martín Ferrer.
 ### AI conversations
 
 Each project has independent, persistent conversations. Use the assistant history, new conversation and options controls to switch, rename, clear or delete a conversation. Dates and times use the browser's local timezone. Clearing or deleting a conversation discards its pending proposals and review snapshots, but never reverts project files. Conversation switching and deletion are disabled during active AI operations. Removing a project from the workspace also removes its conversation history and proposal snapshots, but preserves its source files. Deleting a project from disk additionally removes its source files.
+
+### Agent skills
+
+Bundled Markdown skills in `src/cmf_dev_studio/skills/definitions/` contain a JSON metadata header, a blank line, and trusted procedural guidance. The registry selects up to three skills per role using task keywords and role defaults, without extra model calls. Skills are application-owned; repository files cannot register skills or grant permissions. Selected skill names appear in the proposal's technical activity. Add a definition with `roles`, `keywords`, and `default` metadata to extend the registry without changing orchestration. Selection is heuristic, not semantic retrieval.

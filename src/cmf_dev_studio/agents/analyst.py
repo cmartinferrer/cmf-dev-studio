@@ -8,6 +8,7 @@ from cmf_dev_studio.contracts import (
     structured_response,
 )
 from cmf_dev_studio.llm.client import LLMClient
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.workflow import (
     acceptance_guidance,
     code_awareness_guidance,
@@ -16,8 +17,9 @@ from cmf_dev_studio.workflow import (
 
 
 class AnalystAgent:
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
 
     def plan_patch(
         self, task: str, inventory: str, approved: str, languages: list[str]
@@ -39,6 +41,7 @@ class AnalystAgent:
             f"Languages: {', '.join(languages) or 'unknown'}\nTask: {task}\n"
             f"Inventory (paths only):\n{inventory}\nApproved contents:\n{approved}"
         )
+        prompt += self.skills.guidance("analyst", task)
         data = structured_response(self.llm, prompt, PLAN_SCHEMA)
 
         def entries(key):

@@ -15,3 +15,8 @@ test('hides internal handoffs while preserving answers, permissions and recommen
   assert.deepEqual(visibleChatEvents(events).map(event => event.sequence), [4,5,6,7,8,9,10,11,12]);
   assert.equal(events.length, 13);
 });
+
+test('skill selections stay in technical activity, not conversational messages', () => {
+  const event: ProposalEvent = {sequence: 1, kind: 'skill_selected', created_at: '', details: {stage: 'developer', query: 'safe-refactoring'}};
+  assert.deepEqual(visibleChatEvents([event]), []);
+});

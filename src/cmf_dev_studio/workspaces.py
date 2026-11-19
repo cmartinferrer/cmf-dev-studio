@@ -38,6 +38,7 @@ from cmf_dev_studio.projects.python_environment import (
     preparation_needed,
     prepare_environment,
 )
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.terminal_context import (
     normalize_terminal_context,
     with_terminal_context,
@@ -873,6 +874,13 @@ class WorkspaceService:
                     db, proposal_id, "assistant_recommendation", message=message
                 )
 
+    def _skill_context(self, proposal_id):
+        def activity(role, names):
+            with self._db() as db:
+                self._event(db, proposal_id, "skill_selected", stage=role, query=names)
+
+        return SkillContext(activity=activity)
+
     def _investigate(self, proposal_id, client, task, context, original, row):
         def activity(action, query):
             with self._db() as db:
@@ -887,6 +895,7 @@ class WorkspaceService:
             {f["path"]: f["content"] for f in context["files"]},
             any(e["kind"] == "exploration_allowed" for e in row["events"]),
             activity,
+            skills=self._skill_context(proposal_id),
         )
         action, message = investigator.run(
             task, row["terminal_context"], row["assistant_language"], history
@@ -1269,6 +1278,7 @@ class WorkspaceService:
             engine = Orchestrator(
                 GeminiClient(),
                 independent_recommendations=True,
+                skills=self._skill_context(proposal_id),
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),
@@ -1454,6 +1464,7 @@ class WorkspaceService:
             engine = Orchestrator(
                 client,
                 independent_recommendations=True,
+                skills=self._skill_context(proposal_id),
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),

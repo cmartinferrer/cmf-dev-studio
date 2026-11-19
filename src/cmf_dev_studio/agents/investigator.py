@@ -6,6 +6,7 @@ import json
 import logging
 
 from cmf_dev_studio.contracts import structured_response
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.tools.builtins import repository_registry
 from cmf_dev_studio.tools.context import ToolContext
 from cmf_dev_studio.tools.executor import ToolExecutor
@@ -44,8 +45,9 @@ LOGGER = logging.getLogger("uvicorn.error.cmf.investigator")
 class Investigator:
     """Let the model choose evidence, without granting filesystem or shell access."""
 
-    def __init__(self, llm, original, approved, allowed, activity):
+    def __init__(self, llm, original, approved, allowed, activity, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
         self.context = ToolContext(
             RepositorySnapshot(original), approved, allowed, activity
         )
@@ -125,6 +127,7 @@ class Investigator:
                     ensure_ascii=False,
                 )
             )
+            prompt += self.skills.guidance("investigator", task)
             response = structured_response(self.llm, prompt, SCHEMA)
             action, query, message = (
                 response.get(k, "") for k in ("action", "query", "message")

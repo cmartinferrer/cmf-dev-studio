@@ -10,6 +10,7 @@ from cmf_dev_studio.contracts import (
     structured_response,
 )
 from cmf_dev_studio.llm.client import LLMClient
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.workflow import (
     acceptance_guidance,
     code_awareness_guidance,
@@ -24,8 +25,9 @@ class PatchGenerationError(ValueError):
 
 
 class DeveloperAgent:
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
         self.recommendation = ""
 
     def generate_patch(
@@ -62,6 +64,9 @@ class DeveloperAgent:
             "\nOPTIONAL ADVICE: "
             + recommendation_guidance()
             + " Evaluate advice against the complete operations you are about to return, not just the original code.\n"
+        )
+        instructions += self.skills.guidance(
+            "developer", " ".join((*plan.requirements, *plan.acceptance))
         )
         last_error = ""
         for attempt in range(max_attempts):

@@ -12,6 +12,7 @@ from cmf_dev_studio.contracts import (
 )
 from cmf_dev_studio.llm.client import LLMClient
 from cmf_dev_studio.recommendations import RecommendationContext
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.workflow import (
     acceptance_guidance,
     code_awareness_guidance,
@@ -22,8 +23,9 @@ from cmf_dev_studio.workflow import (
 
 
 class TesterAgent:
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
         self.recommendation = ""
 
     def review_patch(
@@ -93,6 +95,7 @@ class TesterAgent:
             + json.dumps(candidates.candidates(), ensure_ascii=False)
             + "\nIndependently assess every candidate against the task, plan and proposed diffs. If any remains evidence-backed and genuinely optional, return the best one even if you found no new advice. Return an empty string only after rejecting all candidates and finding no independent improvement. Set recommendation_decision to accepted when returning advice, rejected when all supplied candidates are rejected, or none when there were no candidates and no new advice. Your recommendation is final; an empty string vetoes earlier advice."
         )
+        prompt += self.skills.guidance("tester", task)
         try:
             response = structured_response(self.llm, prompt, REVIEW_SCHEMA)
             issues = response.get("issues")

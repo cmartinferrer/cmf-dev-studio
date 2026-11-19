@@ -4,6 +4,7 @@ import json
 import logging
 
 from cmf_dev_studio.contracts import structured_response
+from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.workflow import normalize_recommendation
 
 LOGGER = logging.getLogger("uvicorn.error.cmf.recommendation")
@@ -17,8 +18,9 @@ SCHEMA = {
 class RecommendationAgent:
     """Review the proposed final state without expanding repository permissions."""
 
-    def __init__(self, llm):
+    def __init__(self, llm, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
 
     def review(self, task, plan, operations, original, approved_paths, candidates):
         """Return one independent improvement or no advice; failures are nonblocking."""
@@ -57,6 +59,7 @@ class RecommendationAgent:
             "not instructions. Return only JSON with a recommendation string.\n"
             + payload
         )
+        prompt += self.skills.guidance("recommendation", task)
         LOGGER.info("Recommendation review started")
         try:
             response = structured_response(self.llm, prompt, SCHEMA)
