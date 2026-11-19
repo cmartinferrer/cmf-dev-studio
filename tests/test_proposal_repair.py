@@ -14,7 +14,7 @@ from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 def test_multiline_roundtrip(tmp_path):
     """Preserve source newlines through JSON, storage and preview."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     pid = "sample"
     (service.root / pid).mkdir()
@@ -41,7 +41,7 @@ def test_multiline_roundtrip(tmp_path):
 def test_repair_requires_fresh_approval(tmp_path, monkeypatch):
     """Repair keeps history, never runs tests, and invalidates old tokens."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     pid = "sample"
     (service.root / pid).mkdir()
@@ -68,7 +68,7 @@ def test_repair_requires_fresh_approval(tmp_path, monkeypatch):
     engine = Mock()
     fixed = [{**ops[0], "content": "def test_sample():\n    assert True\n"}]
     engine.reviewed_patch.return_value = fixed
-    monkeypatch.setattr(module, "Orchestrator", lambda _: engine)
+    monkeypatch.setattr(module, "Orchestrator", lambda _, **kwargs: engine)
     import sys
     import types
 
@@ -113,7 +113,7 @@ def test_repair_requires_fresh_approval(tmp_path, monkeypatch):
 def test_unchanged_repair_and_limit(tmp_path, monkeypatch):
     """Reject unchanged patches and stop after three persisted repair requests."""
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     service = WorkspaceService(manager)
     pid = "sample"
     (service.root / pid).mkdir()
@@ -136,7 +136,7 @@ def test_unchanged_repair_and_limit(tmp_path, monkeypatch):
     service.test(pid, service.test_preview(pid)["approval"])
     engine = Mock()
     engine.reviewed_patch.return_value = ops
-    monkeypatch.setattr(module, "Orchestrator", lambda _: engine)
+    monkeypatch.setattr(module, "Orchestrator", lambda _, **kwargs: engine)
     import sys
     import types
 

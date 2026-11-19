@@ -4,9 +4,10 @@ import os
 import subprocess
 from importlib.metadata import version
 from pathlib import Path
+from threading import RLock
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, status
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field, StrictBool
 
 from cmf_dev_studio.api.terminal import terminal_socket
@@ -37,6 +38,7 @@ from cmf_dev_studio.projects.python_environment import (
     select_interpreter,
 )
 from cmf_dev_studio.projects.search import search_files
+from cmf_dev_studio.terminal_context import TerminalContext
 from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 
 
@@ -44,15 +46,14 @@ class ProjectResponse(BaseModel):
     id: str
     name: str
     path: str
-    kind: Literal["managed", "existing"]
     description: str
     created_at: str
-    read_only: bool
     language: ProjectLanguage
 
 
 class CreateProjectRequest(BaseModel):
     language: ProjectLanguage = ProjectLanguage.AUTO
+    location: str = Field(min_length=1)
     name: str = Field(min_length=1, max_length=80)
     description: str = Field(default="", max_length=2000)
 
@@ -63,8 +64,6 @@ class UpdateProjectLanguageRequest(BaseModel):
 
 class RegisterProjectRequest(BaseModel):
     path: str = Field(min_length=1)
-    name: str | None = None
-    description: str = Field(default="", max_length=2000)
 
 
 def _response(project: Project) -> ProjectResponse:
@@ -72,10 +71,8 @@ def _response(project: Project) -> ProjectResponse:
         id=project.id,
         name=project.name,
         path=str(project.path),
-        kind=project.kind.value,
         description=project.description,
         created_at=project.created_at,
-        read_only=project.read_only,
         language=project.language,
     )
 
@@ -88,9 +85,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     workspaces = WorkspaceService(manager)
     app = FastAPI(title="CMF Dev Studio API", version=version("cmf-dev-studio"))
 
+    active_terminals: dict[str, int] = {}
+    project_lock = RLock()
+
     @app.websocket("/api/projects/{project_id}/terminal")
     async def project_terminal(websocket: WebSocket, project_id: str) -> None:
-        await terminal_socket(websocket, manager)
+        with project_lock:
+            active_terminals[project_id] = active_terminals.get(project_id, 0) + 1
+        try:
+            await terminal_socket(websocket, manager)
+        finally:
+            with project_lock:
+                active_terminals[project_id] -= 1
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -109,10 +115,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         try:
             return _response(
                 manager.create(
-                    request.name, request.description, language=request.language
+                    request.name,
+                    request.description,
+                    language=request.language,
+                    location=request.location,
                 )
             )
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.post(
@@ -122,12 +131,8 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     )
     def register_project(request: RegisterProjectRequest) -> ProjectResponse:
         try:
-            return _response(
-                manager.register_existing(
-                    request.path, request.name, request.description
-                )
-            )
-        except ValueError as exc:
+            return _response(manager.register_existing(request.path))
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}", response_model=ProjectResponse)
@@ -189,6 +194,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
+        if (
+            project.language == ProjectLanguage.AUTO
+            and environment_info(project)["available"]
+        ):
+            project = manager.update_language(project_id, ProjectLanguage.PYTHON)
         return environment_info(project)
 
     class JdkRequest(BaseModel):
@@ -231,30 +241,94 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     ) -> ProjectResponse:
         try:
             project = manager.rename(project_id, request.name)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
         return _response(project)
 
-    @app.delete("/api/projects/{project_id}")
-    def delete_project(project_id: str, confirmed: bool = False) -> dict:
-        if not confirmed:
-            raise HTTPException(status_code=400, detail="Confirmation required")
-        if any(
-            p["status"] in ("queued", "running", "generating", "repairing")
-            for p in workspaces.list(project_id)
-        ):
-            raise HTTPException(
-                status_code=409, detail="Wait for the active AI operation"
-            )
+    opened_projects: dict[str, set[str]] = {}
+    presence_connections: dict[tuple[str, str], int] = {}
+
+    @app.post("/api/projects/{project_id}/open")
+    def open_project(project_id: str, session: str = "legacy") -> dict:
+        with project_lock:
+            project = manager.get(project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="Project not found")
+            if (
+                project.language == ProjectLanguage.AUTO
+                and environment_info(project)["available"]
+            ):
+                manager.update_language(project_id, ProjectLanguage.PYTHON)
+            opened_projects.setdefault(project_id, set()).add(session)
+        return {"opened": True}
+
+    @app.post("/api/projects/{project_id}/close")
+    def close_project(project_id: str, session: str = "legacy") -> dict:
+        with project_lock:
+            opened_projects.get(project_id, set()).discard(session)
+        return {"closed": True}
+
+    @app.websocket("/api/projects/{project_id}/presence")
+    async def project_presence(websocket: WebSocket, project_id: str) -> None:
+        session = websocket.query_params.get("session", "")
+        if not session:
+            await websocket.close(code=1008)
+            return
+        with project_lock:
+            exists = manager.get(project_id) is not None
+            if exists:
+                opened_projects.setdefault(project_id, set()).add(session)
+                key = (project_id, session)
+                presence_connections[key] = presence_connections.get(key, 0) + 1
+        if not exists:
+            await websocket.close(code=1008)
+            return
         try:
-            deleted = manager.delete(project_id)
-        except (ValueError, OSError) as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Project not found")
-        return {"deleted": True}
+            await websocket.accept()
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            with project_lock:
+                count = presence_connections[key] - 1
+                if count:
+                    presence_connections[key] = count
+                else:
+                    presence_connections.pop(key)
+                    opened_projects.get(project_id, set()).discard(session)
+
+    @app.delete("/api/projects/{project_id}")
+    def delete_project(
+        project_id: str, confirmed: bool = False, from_disk: bool = False
+    ) -> dict:
+        with project_lock:
+            if not confirmed:
+                raise HTTPException(status_code=400, detail="Confirmation required")
+            if (
+                opened_projects.get(project_id)
+                or any(key[0] == project_id for key in presence_connections)
+                or active_terminals.get(project_id, 0)
+            ):
+                raise HTTPException(status_code=409, detail="Close the project first")
+            if any(
+                p["status"] in ("queued", "running", "generating", "repairing")
+                for p in workspaces.list(project_id)
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Wait for the active AI operation"
+                )
+            try:
+                deleted = workspaces.remove_project(project_id, from_disk=from_disk)
+            except WorkspaceError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            except (ValueError, OSError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Project not found")
+            return {"deleted": True}
 
     @app.get("/api/local/directories")
     def local_directories(path: str = "") -> dict:
@@ -298,22 +372,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         content: str = Field(max_length=262144)
         expected_sha256: str | None = None
         create: bool = False
-        authorize_existing: bool = False
 
     class DeleteRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
         expected_sha256: str
-        authorize_existing: bool = False
 
-    def editable_project(project_id: str, authorize_existing: bool):
+    def editable_project(project_id: str):
         project = manager.get(project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        if project.read_only and not authorize_existing:
-            raise HTTPException(
-                status_code=403,
-                detail="Explicit authorization required for existing projects",
-            )
         return project
 
     @app.get("/api/projects/{project_id}/editor/file")
@@ -328,7 +395,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.put("/api/projects/{project_id}/editor/file")
     def editor_save(project_id: str, request: EditRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             return write_editable(
                 project.path,
@@ -344,7 +411,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.delete("/api/projects/{project_id}/editor/file")
     def editor_delete(project_id: str, request: DeleteRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             return delete_editable(project.path, request.path, request.expected_sha256)
         except EditConflict as exc:
@@ -355,20 +422,14 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     class EntryRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
         name: str | None = None
-        authorize_existing: StrictBool = False
         confirmed: StrictBool = False
 
     @app.patch("/api/projects/{project_id}/editor/entry")
     def editor_rename_entry(project_id: str, request: EntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (
-                target == manager.data_dir
-                or target in manager.data_dir.parents
-                or manager.data_dir in target.parents
-            ):
-                raise ExplorerError("Protected Studio data")
+            protect_studio(target)
             return rename_entry(project.path, request.path, request.name or "")
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -377,7 +438,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     class DirectoryRequest(BaseModel):
         path: str = Field(min_length=1, max_length=500)
-        authorize_existing: StrictBool = False
 
     class MoveRequest(DirectoryRequest):
         parent: str = Field(max_length=500)
@@ -389,12 +449,9 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/editor/directory")
     def editor_create_directory(project_id: str, request: DirectoryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
-            if project.read_only:
-                protect_studio(
-                    safe_path(project.path, request.path, allow_missing=True)
-                )
+            protect_studio(safe_path(project.path, request.path, allow_missing=True))
             return create_directory(project.path, request.path)
         except EditConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -403,13 +460,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.patch("/api/projects/{project_id}/editor/move")
     def editor_move_entry(project_id: str, request: MoveRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         try:
             source = entry_path(project.path, request.path)
             destination = directory_path(project.path, request.parent) / source.name
-            if project.read_only:
-                protect_studio(source)
-                protect_studio(destination)
+            protect_studio(source)
+            protect_studio(destination)
             if source == destination:
                 return {"path": request.path}
             return workspaces.move_resource(
@@ -423,17 +479,12 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.delete("/api/projects/{project_id}/editor/entry")
     def editor_delete_entry(project_id: str, request: EntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if not request.confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
             target = entry_path(project.path, request.path)
-            if project.read_only and (
-                target == manager.data_dir
-                or target in manager.data_dir.parents
-                or manager.data_dir in target.parents
-            ):
-                raise ExplorerError("Protected Studio data")
+            protect_studio(target)
             return delete_entry(project.path, request.path)
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -441,12 +492,11 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     class BatchEntryRequest(BaseModel):
         paths: list[str] = Field(min_length=1, max_length=500)
         parent: str | None = Field(default=None, max_length=500)
-        authorize_existing: StrictBool = False
         confirmed: StrictBool = False
 
     @app.post("/api/projects/{project_id}/editor/batch")
     def editor_batch(project_id: str, request: BatchEntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if request.parent is None and not request.confirmed:
             raise HTTPException(status_code=400, detail="Confirmation required")
         try:
@@ -456,7 +506,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio if project.read_only else lambda target: None,
+                    protect_studio,
                 ),
             )
         except EditConflict as exc:
@@ -466,7 +516,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     @app.post("/api/projects/{project_id}/editor/copy")
     def editor_copy(project_id: str, request: BatchEntryRequest) -> dict:
-        project = editable_project(project_id, request.authorize_existing)
+        project = editable_project(project_id)
         if request.parent is None:
             raise HTTPException(status_code=422, detail="Destination required")
         try:
@@ -476,7 +526,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
                     project.path,
                     request.paths,
                     request.parent,
-                    protect_studio if project.read_only else lambda target: None,
+                    protect_studio,
                 ),
             )
         except EditConflict as exc:
@@ -504,8 +554,54 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (ExplorerError, OSError, ValueError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    class ConversationTitle(BaseModel):
+        title: str = Field(min_length=1, max_length=120)
+
+    @app.get("/api/projects/{project_id}/conversations")
+    def list_conversations(project_id: str) -> list[dict]:
+        try:
+            return workspaces.conversations(project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/projects/{project_id}/conversations")
+    def create_conversation(project_id: str) -> dict:
+        try:
+            return workspaces.create_conversation(project_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.patch("/api/projects/{project_id}/conversations/{cid}")
+    def rename_conversation(
+        project_id: str, cid: str, request: ConversationTitle
+    ) -> dict:
+        try:
+            return workspaces.rename_conversation(project_id, cid, request.title)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.delete("/api/projects/{project_id}/conversations/{cid}")
+    def remove_conversation(
+        project_id: str, cid: str, clear: bool = False, confirmed: bool = False
+    ) -> dict:
+        if not confirmed:
+            raise HTTPException(status_code=400, detail="Confirmation required")
+        try:
+            return workspaces.remove_conversation(project_id, cid, clear)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except WorkspaceError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     class ProposalRequest(BaseModel):
-        task: str = Field(min_length=1, max_length=4000)
+        conversation_id: str | None = None
+        terminal_context: list[TerminalContext] = Field(
+            default_factory=list, max_length=3
+        )
+        task: str = Field(min_length=1, max_length=24000)
+        assistant_language: str = Field(default="", pattern="^(Spanish|English)?$")
         context_paths: list[str] = Field(default_factory=list, max_length=8)
         context_digest: str | None = None
 
@@ -515,7 +611,13 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     def create_proposal(project_id: str, request: ProposalRequest) -> dict:
         try:
             return workspaces.submit(
-                project_id, request.task, request.context_paths, request.context_digest
+                project_id,
+                request.task,
+                request.context_paths,
+                request.context_digest,
+                [item.model_dump() for item in request.terminal_context],
+                request.assistant_language,
+                request.conversation_id,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -523,10 +625,15 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/projects/{project_id}/proposals")
-    def list_proposals(project_id: str) -> list[dict]:
+    def list_proposals(
+        project_id: str, conversation_id: str | None = None
+    ) -> list[dict]:
         if manager.get(project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
-        return workspaces.list(project_id)
+        try:
+            return workspaces.list(project_id, conversation_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/proposals/{proposal_id}")
     def get_proposal(proposal_id: str) -> dict:
@@ -546,7 +653,6 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
 
     class ApplyRequest(BaseModel):
         approved: StrictBool
-        allow_existing: StrictBool = False
 
     class TestApproval(BaseModel):
         approval: str
@@ -597,6 +703,18 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    class ExplorationDecision(BaseModel):
+        allow: StrictBool
+
+    @app.post("/api/proposals/{proposal_id}/exploration-decision")
+    def exploration_decision(proposal_id: str, request: ExplorationDecision) -> dict:
+        try:
+            return workspaces.exploration_decision(proposal_id, request.allow)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     class DeferRequest(BaseModel):
         action: str
 
@@ -612,9 +730,7 @@ def create_app(data_dir: str | Path | None = None) -> FastAPI:
     @app.post("/api/proposals/{proposal_id}/apply")
     def apply_proposal(proposal_id: str, request: ApplyRequest) -> dict:
         try:
-            return workspaces.apply(
-                proposal_id, request.approved, request.allow_existing
-            )
+            return workspaces.apply(proposal_id, request.approved)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except (WorkspaceError, OSError) as exc:

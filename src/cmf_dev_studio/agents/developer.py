@@ -10,12 +10,25 @@ from cmf_dev_studio.contracts import (
     structured_response,
 )
 from cmf_dev_studio.llm.client import LLMClient
-from cmf_dev_studio.workflow import acceptance_guidance, test_quality_guidance
+from cmf_dev_studio.skills.registry import SkillContext
+from cmf_dev_studio.workflow import (
+    acceptance_guidance,
+    code_awareness_guidance,
+    normalize_recommendation,
+    recommendation_guidance,
+    test_quality_guidance,
+)
+
+
+class PatchGenerationError(ValueError):
+    """The model exhausted structural patch validation attempts."""
 
 
 class DeveloperAgent:
-    def __init__(self, llm: LLMClient):
+    def __init__(self, llm: LLMClient, *, skills=None):
         self.llm = llm
+        self.skills = skills if skills is not None else SkillContext()
+        self.recommendation = ""
 
     def generate_patch(
         self,
@@ -24,8 +37,15 @@ class DeveloperAgent:
         *,
         feedback: str = "",
         max_attempts: int = 3,
+        quick: bool = False,
         validate: Callable[[object], None],
     ) -> list[dict]:
+        self.recommendation = ""
+        test_instruction = (
+            "\nFor this localized correction, preserve existing tests. Add a regression test only if needed and exercise the actual production entry point. Do not invent behavior or unrelated tests. "
+            if quick
+            else "\nGenerate concrete runnable tests when the requested change is testable. "
+        )
         instructions = (
             "\nROLE: DEVELOPER. Implement these ANALYST requirements:\n"
             + "\n".join("- " + r for r in plan.requirements)
@@ -34,11 +54,20 @@ class DeveloperAgent:
                 "\n".join("- " + r for r in plan.acceptance)
                 or "(no additional criteria)"
             )
-            + "\nGenerate concrete runnable tests when the requested change is testable. "
-            "Implement the original task as well as the plan. Never remove required behavior, replace integrations with placeholders, swallow missing dependencies, or weaken valid tests to pass a repair. Declare required dependencies using project conventions. "
+            + test_instruction
+            + "Implement the original task as well as the plan. Never remove required behavior, replace integrations with placeholders, swallow missing dependencies, or weaken valid tests to pass a repair. Declare required dependencies using project conventions. "
             "Do not generate self-referential or tautological assertions. Preserve conventional indentation, blank lines and real line breaks in every source and build file. Encode line breaks as JSON newline escapes, never flatten or minify code. Check imports and syntax; Java static imports must begin with import static. For new Maven projects specify compatible Java release and explicit compiler and test plugin versions. Preserve existing build conventions.\n"
         )
+        instructions += "\nCODE AWARENESS: " + code_awareness_guidance() + "\n"
         instructions += "\nTEST QUALITY: " + test_quality_guidance() + "\n"
+        instructions += (
+            "\nOPTIONAL ADVICE: "
+            + recommendation_guidance()
+            + " Evaluate advice against the complete operations you are about to return, not just the original code.\n"
+        )
+        instructions += self.skills.guidance(
+            "developer", " ".join((*plan.requirements, *plan.acceptance))
+        )
         last_error = ""
         for attempt in range(max_attempts):
             request = prompt + instructions
@@ -54,14 +83,17 @@ class DeveloperAgent:
                     + "\nReturn corrected JSON without expanding permissions."
                 )
             try:
-                request += '\nFINAL OUTPUT CONTRACT: Return exactly one JSON object {"operations": [{"action": "create", "path": "relative/path", "content": "complete file content"}]}. Never return a bare array, source code, or prose. Choose the action according to the inventory and approved context. For delete use empty content.\n'
+                request += '\nFINAL OUTPUT CONTRACT: Return exactly one JSON object {"recommendation": "", "operations": [{"action": "create", "path": "relative/path", "content": "complete file content"}]}. Never return a bare array, source code, or prose. Choose the action according to the inventory and approved context. For delete use empty content.\n'
                 parsed = structured_response(self.llm, request, PATCH_SCHEMA)
                 operations = parsed["operations"]
                 validate(operations)
+                self.recommendation = normalize_recommendation(
+                    parsed.get("recommendation")
+                )
                 return operations
             except (ValueError, KeyError, TypeError) as exc:
                 last_error = str(exc)[:240]
-        raise ValueError("Could not generate a safe patch: " + last_error)
+        raise PatchGenerationError("Could not generate a safe patch: " + last_error)
 
 
 def build_workspace_prompt(

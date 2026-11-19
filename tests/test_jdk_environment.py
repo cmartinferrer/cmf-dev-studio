@@ -32,10 +32,12 @@ def test_selection_persists_and_is_scoped(tmp_path, monkeypatch):
     manager = ProjectManager(data)
     with TestClient(create_app(data)) as client:
         java = client.post(
-            "/api/projects", json={"name": "Java", "language": "java"}
+            "/api/projects",
+            json={"location": str(tmp_path), "name": "Java", "language": "java"},
         ).json()
         kotlin = client.post(
-            "/api/projects", json={"name": "Kotlin", "language": "kotlin"}
+            "/api/projects",
+            json={"location": str(tmp_path), "name": "Kotlin", "language": "kotlin"},
         ).json()
         url = f"/api/projects/{java['id']}/jdk"
         assert (
@@ -55,7 +57,7 @@ def test_default_and_missing_selection(tmp_path, monkeypatch):
         lambda: [inspect_jdk(home)],
     )
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Demo", language="kotlin")
+    project = manager.create("Demo", language="kotlin", location=tmp_path)
     assert environment_info(project)["source"] == "detected"
     project = manager.update_jdk(project.id, str(tmp_path / "missing"))
     assert environment_info(project)["current"] is None

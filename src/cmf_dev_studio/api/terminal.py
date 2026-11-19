@@ -24,6 +24,33 @@ from cmf_dev_studio.projects.models import Project
 from cmf_dev_studio.projects.python_environment import environment_info
 
 
+async def terminate_terminal_process(process: subprocess.Popen) -> None:
+    """Terminate the original process group, including surviving children."""
+    try:
+        os.killpg(process.pid, signal.SIGHUP)
+    except ProcessLookupError:
+        await asyncio.to_thread(process.wait)
+        return
+    try:
+        await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=2)
+    except asyncio.TimeoutError:
+        pass
+    # The leader may have exited while a child ignored SIGHUP.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    await asyncio.to_thread(process.wait)
+
+
+def has_foreground_group(master: int) -> bool:
+    """Whether the PTY can deliver terminal-generated signals itself."""
+    try:
+        return os.tcgetpgrp(master) > 0
+    except OSError:
+        return False
+
+
 def allowed_local_origin(ws: WebSocket) -> bool:
     origin = urlparse(ws.headers.get("origin", ""))
     host = ws.headers.get("host", "").split(":")[0]
@@ -220,7 +247,16 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
                     if event.get("type") == "input" and isinstance(
                         event.get("data"), str
                     ):
-                        os.write(master, event["data"].encode())
+                        data = event["data"]
+                        if data == "\x03" and not has_foreground_group(master):
+                            # A new session with an inherited PTY has no controlling
+                            # terminal to deliver SIGINT to its foreground group.
+                            try:
+                                os.killpg(process.pid, signal.SIGINT)
+                            except ProcessLookupError:
+                                pass
+                        else:
+                            os.write(master, data.encode())
                     elif event.get("type") == "resize":
                         cols = max(20, min(300, int(event.get("cols", 80))))
                         rows = max(5, min(100, int(event.get("rows", 24))))
@@ -254,14 +290,8 @@ async def terminal_socket(ws: WebSocket, manager) -> None:
         await ws.send_text(f"\r\nCould not start terminal: {exc}\r\n")
         await ws.close()
     finally:
-        if process is not None and process.poll() is None:
-            try:
-                os.killpg(process.pid, signal.SIGHUP)
-                await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=2)
-            except (ProcessLookupError, asyncio.TimeoutError):
-                if process.poll() is None:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    await asyncio.to_thread(process.wait)
+        if process is not None:
+            await terminate_terminal_process(process)
         if startup is not None:
             startup.cleanup()
         os.close(master)

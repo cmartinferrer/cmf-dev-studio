@@ -30,3 +30,9 @@ test('retry context respects the limit and detects changed or cleared context',(
   assert.equal(sameContext(['a'],[]),false);
   assert.equal(sameContext([],[]),true);
 });
+
+test('split context preserves manual files, exclusions and uniqueness',()=>{
+  assert.deepEqual(contextFiles(['pom.xml'],['Main.java','Calculator.java','Main.java'],[]),['pom.xml','Main.java','Calculator.java']);
+  assert.deepEqual(contextFiles([],['Main.java','Calculator.java'],['Main.java']),['Calculator.java']);
+  assert.deepEqual(contextFiles(['Main.java'],['Main.java','Calculator.java'],[]),['Main.java','Calculator.java']);
+});

@@ -7,7 +7,7 @@ import pytest
 
 from cmf_dev_studio.project_runners import RunnerSpec, execute_runner
 from cmf_dev_studio.projects.jvm_preparation import preparation_spec, prepare_jvm
-from cmf_dev_studio.projects.models import Project, ProjectKind, ProjectLanguage
+from cmf_dev_studio.projects.models import Project, ProjectLanguage
 
 
 @pytest.mark.parametrize(
@@ -19,7 +19,7 @@ from cmf_dev_studio.projects.models import Project, ProjectKind, ProjectLanguage
 )
 def test_prepare_jvm(tmp_path, language, manifest, wrapper, tool):
     """Prefer wrappers and build in place with the chosen JDK."""
-    project = Project("id", "demo", tmp_path, ProjectKind.MANAGED, "", "", language)
+    project = Project("id", "demo", tmp_path, "", "", language)
     (tmp_path / manifest).touch()
     (tmp_path / wrapper).touch()
     spec = preparation_spec(project)
@@ -41,15 +41,11 @@ def test_prepare_jvm(tmp_path, language, manifest, wrapper, tool):
     assert run.call_args.kwargs == {"in_place": True}
 
 
-def test_existing_project_not_prepared(tmp_path):
-    """Do not offer real builds for registered external repositories."""
-    project = Project(
-        "id", "demo", tmp_path, ProjectKind.EXISTING, "", "", ProjectLanguage.JAVA
-    )
+def test_existing_project_can_be_prepared(tmp_path):
+    """Offer the same preparation for registered repositories."""
+    project = Project("id", "demo", tmp_path, "", "", ProjectLanguage.JAVA)
     (tmp_path / "pom.xml").touch()
-    assert preparation_spec(project) is None
-    with pytest.raises(ValueError, match="managed"):
-        prepare_jvm(project)
+    assert preparation_spec(project) is not None
 
 
 def test_runner_in_place(tmp_path):
@@ -67,8 +63,8 @@ def test_jvm_preparation_approval(tmp_path, confirmed):
     from cmf_dev_studio.projects.manager import ProjectManager
     from cmf_dev_studio.workspaces import WorkspaceService
 
-    manager = ProjectManager(tmp_path)
-    project = manager.create("Demo", language=ProjectLanguage.JAVA)
+    manager = ProjectManager(tmp_path / "studio")
+    project = manager.create("Demo", language=ProjectLanguage.JAVA, location=tmp_path)
     service = WorkspaceService(manager)
     pid = "a" * 32
     with service._db() as db:

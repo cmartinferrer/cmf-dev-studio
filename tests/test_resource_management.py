@@ -10,7 +10,7 @@ from cmf_dev_studio.projects.manager import ProjectManager
 def test_project_rename_preserves_identity_and_files(tmp_path):
     """Display names never relocate the project or its files."""
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Old")
+    project = manager.create("Old", location=tmp_path)
     (project.path / "main.py").write_text("hello")
     renamed = manager.rename(project.id, "New")
     assert renamed.id == project.id and renamed.path == project.path
@@ -18,15 +18,15 @@ def test_project_rename_preserves_identity_and_files(tmp_path):
     assert (project.path / "main.py").read_text() == "hello"
 
 
-def test_delete_managed_and_unregister_external(tmp_path):
-    """Only managed workspaces are removed from disk."""
+def test_delete_and_unregister_local_projects(tmp_path):
+    """Only explicitly deleted projects are removed from disk."""
     manager = ProjectManager(tmp_path / "studio")
-    managed = manager.create("Managed")
+    managed = manager.create("Managed", location=tmp_path)
     external = tmp_path / "external"
     external.mkdir()
     (external / "main.py").write_text("keep")
     registered = manager.register_existing(external)
-    assert manager.delete(managed.id) and not managed.path.exists()
+    assert manager.delete(managed.id, from_disk=True) and not managed.path.exists()
     assert manager.delete(registered.id) and (external / "main.py").exists()
     assert manager.list_projects() == []
 
@@ -80,14 +80,8 @@ def test_api_resource_permissions(tmp_path):
         assert client.patch(url + "/name", json={"name": "Renamed"}).status_code == 200
         assert (
             client.patch(
-                url + "/editor/entry", json={"path": "a.py", "name": "b.py"}
-            ).status_code
-            == 403
-        )
-        assert (
-            client.patch(
                 url + "/editor/entry",
-                json={"path": "a.py", "name": "b.py", "authorize_existing": True},
+                json={"path": "a.py", "name": "b.py"},
             ).status_code
             == 200
         )
@@ -95,7 +89,7 @@ def test_api_resource_permissions(tmp_path):
             client.request(
                 "DELETE",
                 url + "/editor/entry",
-                json={"path": "b.py", "authorize_existing": True},
+                json={"path": "b.py"},
             ).status_code
             == 400
         )
@@ -147,7 +141,7 @@ def test_move_api_invalidates_pending_proposal(tmp_path):
     from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("demo")
+    project = manager.create("demo", location=tmp_path)
     (project.path / "a.py").touch()
     service = WorkspaceService(manager)
     pid = "a" * 32
@@ -170,7 +164,7 @@ def test_move_api_invalidates_pending_proposal(tmp_path):
         service.apply(pid, True)
 
 
-def test_directory_and_move_require_external_authorization(tmp_path):
+def test_directory_and_move_registered_project(tmp_path):
     """Registered projects require authorization for both new operations."""
     from fastapi.testclient import TestClient
 
@@ -184,23 +178,11 @@ def test_directory_and_move_require_external_authorization(tmp_path):
             "/api/projects/register", json={"path": str(external)}
         ).json()
         url = "/api/projects/" + project["id"] + "/editor"
-        assert client.post(url + "/directory", json={"path": "src"}).status_code == 403
-        assert (
-            client.post(
-                url + "/directory", json={"path": "src", "authorize_existing": True}
-            ).status_code
-            == 200
-        )
-        assert (
-            client.patch(
-                url + "/move", json={"path": "a.py", "parent": "src"}
-            ).status_code
-            == 403
-        )
+        assert client.post(url + "/directory", json={"path": "src"}).status_code == 200
         assert (
             client.patch(
                 url + "/move",
-                json={"path": "a.py", "parent": "src", "authorize_existing": True},
+                json={"path": "a.py", "parent": "src"},
             ).status_code
             == 200
         )
@@ -245,8 +227,8 @@ def test_batch_invalid_descendant(tmp_path):
     assert (tmp_path / "a.py").exists()
 
 
-def test_batch_api_confirmation_and_authorization(tmp_path):
-    """Batch deletion requires both explicit confirmation and external authorization."""
+def test_batch_api_confirmation(tmp_path):
+    """Batch deletion requires explicit confirmation."""
     from fastapi.testclient import TestClient
 
     from cmf_dev_studio.api.app import create_app
@@ -261,15 +243,9 @@ def test_batch_api_confirmation_and_authorization(tmp_path):
         ).json()
         url = "/api/projects/" + project["id"] + "/editor/batch"
         payload = {"paths": ["a.py", "b.py"], "parent": None}
-        assert client.post(url, json={**payload, "confirmed": True}).status_code == 403
-        assert (
-            client.post(url, json={**payload, "authorize_existing": True}).status_code
-            == 400
-        )
+        assert client.post(url, json={**payload}).status_code == 400
         assert len(list(external.iterdir())) == 2
-        response = client.post(
-            url, json={**payload, "confirmed": True, "authorize_existing": True}
-        )
+        response = client.post(url, json={**payload, "confirmed": True})
         assert response.status_code == 200
         assert len(response.json()["completed"]) == 2
         assert not list(external.iterdir())
@@ -310,8 +286,8 @@ def test_copy_conflicts_and_links(tmp_path):
         copy_entries(tmp_path, ["src"], "dest")
 
 
-def test_copy_api_authorization(tmp_path):
-    """Registered projects require explicit write authorization for paste."""
+def test_copy_api_registered_project(tmp_path):
+    """Registered projects support paste without extra authorization."""
     from fastapi.testclient import TestClient
 
     from cmf_dev_studio.api.app import create_app
@@ -325,11 +301,7 @@ def test_copy_api_authorization(tmp_path):
         ).json()
         url = "/api/projects/" + project["id"] + "/editor/copy"
         payload = {"paths": ["a.py"], "parent": ""}
-        assert client.post(url, json=payload).status_code == 403
-        assert (
-            client.post(url, json={**payload, "authorize_existing": True}).status_code
-            == 200
-        )
+        assert client.post(url, json=payload).status_code == 200
         assert (external / "a (1).py").read_text() == "a"
 
 

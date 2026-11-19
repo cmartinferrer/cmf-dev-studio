@@ -192,9 +192,8 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(
     assert file.read_text() == "original source"
     for body, status in [
         ({}, 422),
-        ({"approved": False, "allow_existing": True}, 409),
-        ({"approved": "true", "allow_existing": True}, 422),
-        ({"approved": True}, 409),
+        ({"approved": False}, 409),
+        ({"approved": "true"}, 422),
     ]:
         assert (
             client.post(f"/api/proposals/{proposal_id}/apply", json=body).status_code
@@ -203,7 +202,7 @@ def test_end_to_end_project_patch_review_test_apply_with_mocked_container(
         assert file.read_text() == "original source"
     applied = client.post(
         f"/api/proposals/{proposal_id}/apply",
-        json={"approved": True, "allow_existing": True},
+        json={"approved": True},
     )
     assert applied.status_code == 200, applied.text
     assert file.read_text() == "revised source"
@@ -230,7 +229,7 @@ def test_tampered_workspace_cannot_be_applied(tmp_path, monkeypatch):
     from cmf_dev_studio.workspaces import WorkspaceService, tree_digest
 
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("example")
+    project = manager.create("example", location=tmp_path)
     service = WorkspaceService(manager)
     proposal_id = "c" * 32
     workspace = service.root / proposal_id

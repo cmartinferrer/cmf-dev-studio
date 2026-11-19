@@ -6,10 +6,11 @@ import PythonEnvironmentControl from './PythonEnvironmentControl';
 import JdkEnvironmentControl from './JdkEnvironmentControl';
 
 /** Workspace metadata and language controls, independent of the editor panels. */
-export default function WorkspaceStatusBar({ project, busy, onLanguageChange, revision }: {
+export default function WorkspaceStatusBar({ project, busy, onLanguageChange, revision, onProjectUpdated }: {
   project: Project;
   busy: boolean;
   revision: number;
+  onProjectUpdated: (project: Project) => void;
   onLanguageChange: (language: ProjectLanguage) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -27,9 +28,9 @@ export default function WorkspaceStatusBar({ project, busy, onLanguageChange, re
   }, [open]);
   function close() { setOpen(false); trigger.current?.focus(); }
   return <footer className="workspace-status-bar" aria-label="Workspace status">
-    <div className="workspace-status-left"><FolderOpen size={13}/><span>{project.kind === 'existing' ? 'Registered repository' : 'Managed workspace'}</span></div>
+    <div className="workspace-status-left"><FolderOpen size={13}/><span>Local workspace</span></div>
     <div className="workspace-status-right">
-      <PythonEnvironmentControl project={project} revision={revision}/>
+      <PythonEnvironmentControl project={project} revision={revision} onProjectUpdated={onProjectUpdated}/>
       <JdkEnvironmentControl key={project.id} project={project} revision={revision}/>
       <div className="workspace-language-control" ref={root} onBlur={event=>{if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);}} onKeyDown={event=>{
         if (event.key === 'Escape' && open) { event.preventDefault(); close(); }

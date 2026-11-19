@@ -1,4 +1,4 @@
-"""Explicitly approved builds of managed JVM projects."""
+"""Explicitly approved builds of local JVM projects."""
 
 from dataclasses import replace
 
@@ -9,7 +9,7 @@ from cmf_dev_studio.projects.models import Project, ProjectLanguage
 
 def preparation_spec(project: Project) -> RunnerSpec | None:
     """Select the build tool without requiring test sources."""
-    if project.read_only or project.language == ProjectLanguage.PYTHON:
+    if project.language == ProjectLanguage.PYTHON:
         return None
     root = project.path
     if (root / "pom.xml").is_file():
@@ -27,7 +27,7 @@ def prepare_jvm(project: Project) -> str:
     """Build in the actual project only after the caller obtains approval."""
     spec = preparation_spec(project)
     if spec is None:
-        raise ValueError("Preparation requires a managed Maven or Gradle project")
+        raise ValueError("Preparation requires a Maven or Gradle project")
     jdk = environment_info(project)["current"]
     if not jdk:
         raise ValueError("Select an available project JDK before preparing the project")

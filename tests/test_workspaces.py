@@ -72,7 +72,9 @@ def fake_gemini(response):
 
 def test_new_project_proposal_api(tmp_path):
     client = TestClient(create_app(tmp_path / "data"))
-    project = client.post("/api/projects", json={"name": "hello-fastapi"}).json()
+    project = client.post(
+        "/api/projects", json={"location": str(tmp_path), "name": "hello-fastapi"}
+    ).json()
     response = {
         "operations": [
             {
@@ -203,14 +205,16 @@ def test_proposal_diff_preview_is_read_only_and_detects_conflicts(tmp_path):
     ],
 )
 def test_empty_project_language_reaches_all_agents(tmp_path, language, label, filename):
-    """An empty project supplies its configured language to analyst, developer and tester."""
+    """An empty project supplies its configured language to all four agents."""
     from unittest.mock import Mock
 
     from cmf_dev_studio.projects import ProjectLanguage, ProjectManager
     from cmf_dev_studio.workspaces import WorkspaceService
 
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Calculator", language=ProjectLanguage(language))
+    project = manager.create(
+        "Calculator", language=ProjectLanguage(language), location=tmp_path
+    )
     service = WorkspaceService(manager)
     llm = Mock()
     llm.generate.side_effect = [
@@ -219,6 +223,7 @@ def test_empty_project_language_reaches_all_agents(tmp_path, language, label, fi
             {"operations": [{"action": "create", "path": filename, "content": ""}]}
         ),
         json.dumps({"issues": []}),
+        json.dumps({"recommendation": "", "critical": ""}),
     ]
     module = types.ModuleType("cmf_dev_studio.llm.gemini")
     module.GeminiClient = lambda: llm
@@ -230,7 +235,8 @@ def test_empty_project_language_reaches_all_agents(tmp_path, language, label, fi
                 break
             time.sleep(0.02)
     assert proposal["status"] == "ready", proposal
-    assert len(llm.generate.call_args_list) == 3
+    assert len(llm.generate.call_args_list) == 4
+    assert "ROLE: RECOMMENDATION" in llm.generate.call_args_list[-1].args[0]
     for call in llm.generate.call_args_list:
         assert f"Primary implementation language is {label}" in call.args[0]
     assert proposal["task"] == "Create a calculator"
@@ -264,7 +270,9 @@ def test_empty_project_retries_empty_patch_without_context(tmp_path):
     from cmf_dev_studio.workspaces import WorkspaceService
 
     manager = ProjectManager(tmp_path / "studio")
-    project = manager.create("Calculator", language=ProjectLanguage.JAVA)
+    project = manager.create(
+        "Calculator", language=ProjectLanguage.JAVA, location=tmp_path
+    )
     service = WorkspaceService(manager)
     llm = Mock()
     llm.generate.side_effect = [

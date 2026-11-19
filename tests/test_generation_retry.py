@@ -11,7 +11,7 @@ from cmf_dev_studio.workspaces import WorkspaceError, WorkspaceService
 @pytest.fixture
 def failed(tmp_path, monkeypatch):
     manager = ProjectManager(tmp_path / "data")
-    project = manager.create("sample")
+    project = manager.create("sample", location=tmp_path)
     (project.path / "main.py").write_text("x = 1\n")
     service = WorkspaceService(manager)
     calls = []
