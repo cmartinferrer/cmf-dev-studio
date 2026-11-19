@@ -313,7 +313,9 @@ cmf-dev-studio/
 ├── CHANGELOG.md
 ├── RELEASING.md
 ├── .github/workflows/
-├── scripts/release.py
+├── scripts/
+│   ├── release.py
+│   └── sync_develop.py
 ├── .env.example
 ├── pyproject.toml
 ├── uv.lock
@@ -357,11 +359,10 @@ uv run pytest -q -m integration
 
 The parametrized integration test uses the three reference projects and verifies automatic runner selection and real test execution. It does not call Gemini. Missing native tools cause the corresponding integration test to be skipped.
 
-Run frontend tests and build:
+Build the frontend:
 
 ```bash
 cd frontend
-npm run test
 npm run build
 cd ..
 ```
@@ -457,7 +458,7 @@ Contributions, ideas and feedback are welcome. If you would like to improve the 
 
 Please keep changes focused, run Ruff lint and format checks, include relevant tests and preserve the project's explicit context authorization and human approval safeguards. Never include credentials, private repository contents or local application data in contributions.
 
-Development changes target `develop`. Stable releases are prepared on `release/vX.Y.Z` branches and published automatically after merging into `main`. See [RELEASING.md](RELEASING.md) for the maintainer procedure and [CHANGELOG.md](CHANGELOG.md) for version history.
+Development changes target `develop`. Stable releases are prepared on `release/vX.Y.Z` branches and published automatically after merging into `main`. A release bot opens a protected synchronization PR into `develop` and requests auto-merge. See [RELEASING.md](RELEASING.md) for the maintainer procedure and [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Author
 
