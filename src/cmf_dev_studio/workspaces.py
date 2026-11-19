@@ -6,10 +6,12 @@ import ast
 import difflib
 import hashlib
 import json
+import logging
 import os
 import shutil
 import sqlite3
 import subprocess
+import traceback
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -40,6 +42,8 @@ from cmf_dev_studio.terminal_context import (
     normalize_terminal_context,
     with_terminal_context,
 )
+
+LOGGER = logging.getLogger("uvicorn.error.cmf.workspaces")
 
 EXCLUDED = {
     ".git",
@@ -864,12 +868,15 @@ class WorkspaceService:
         action, message = investigator.run(
             task, row["terminal_context"], row["assistant_language"], history
         )
-        if action in ("patch", "quick_patch"):
-            self._record_recommendation(proposal_id, investigator.recommendation)
         with self._db() as db:
-            self._event(
-                db, proposal_id, "assistant_response", message=message, action=action
-            )
+            if action not in ("patch", "quick_patch"):
+                self._event(
+                    db,
+                    proposal_id,
+                    "assistant_response",
+                    message=message,
+                    action=action,
+                )
             if action in ("patch", "quick_patch"):
                 self._event(
                     db,
@@ -878,6 +885,7 @@ class WorkspaceService:
                     action=action,
                     message=message,
                     paths=list(investigator.approved),
+                    recommendation=investigator.recommendation,
                 )
                 db.execute(
                     "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
@@ -888,7 +896,7 @@ class WorkspaceService:
                 proposal_id,
                 "awaiting_exploration" if action == "permission" else "answered",
             )
-        return action, message, investigator.approved
+        return action, message, investigator.approved, investigator.recommendation
 
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
@@ -1237,6 +1245,7 @@ class WorkspaceService:
             load_dotenv()
             engine = Orchestrator(
                 GeminiClient(),
+                independent_recommendations=True,
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),
@@ -1307,6 +1316,14 @@ class WorkspaceService:
                         validate,
                         lambda stage: self._stage(proposal_id, stage),
                         feedback=row["test_output"],
+                        investigation_recommendation=next(
+                            (
+                                e["details"].get("recommendation", "")
+                                for e in reversed(row["events"])
+                                if e["kind"] == "investigation_completed"
+                            ),
+                            "",
+                        ),
                         quick=next(
                             (
                                 e["details"].get("action") == "quick_patch"
@@ -1380,7 +1397,9 @@ class WorkspaceService:
         with self._db() as db:
             self._event(db, proposal_id, "exploration_tool", stage=action, query=query)
 
-    def _save_discovered_context(self, proposal_id, action, message, discovered):
+    def _save_discovered_context(
+        self, proposal_id, action, message, discovered, recommendation=""
+    ):
         with self._db() as db:
             self._event(
                 db,
@@ -1389,6 +1408,7 @@ class WorkspaceService:
                 action=action,
                 message=message,
                 paths=list(discovered),
+                recommendation=recommendation,
             )
             db.execute(
                 "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
@@ -1408,6 +1428,7 @@ class WorkspaceService:
             client = GeminiClient()
             engine = Orchestrator(
                 client,
+                independent_recommendations=True,
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),
@@ -1439,6 +1460,7 @@ class WorkspaceService:
                         break
                 if completed:
                     action, message = completed["action"], completed["message"]
+                    recommendation = completed.get("recommendation", "")
                     discovered = {
                         p: original[p].decode("utf-8") for p in completed["paths"]
                     }
@@ -1456,11 +1478,12 @@ class WorkspaceService:
                         "",
                     )
                 else:
-                    action, message, discovered = self._investigate(
+                    action, message, discovered, recommendation = self._investigate(
                         proposal_id, client, task, context, original, row
                     )
                 if action not in ("patch", "quick_patch"):
                     return
+                options["investigation_recommendation"] = recommendation
                 approved_paths = set(discovered)
                 approved = with_terminal_context(
                     "\n\n".join(f"FILE: {p}\n{v}" for p, v in discovered.items()),
@@ -1497,7 +1520,11 @@ class WorkspaceService:
                         )
                     approved_paths.update(investigator.approved)
                     self._save_discovered_context(
-                        proposal_id, action, message, investigator.approved
+                        proposal_id,
+                        action,
+                        message,
+                        investigator.approved,
+                        recommendation,
                     )
                     return with_terminal_context(
                         "\n\n".join(
@@ -1572,6 +1599,12 @@ class WorkspaceService:
             self._stage(proposal_id, "awaiting_tests")
         # Record unexpected generation failures in the proposal state.
         except Exception as exc:  # noqa: BLE001
+            LOGGER.error(
+                "Generation failed: proposal=%s type=%s\n%s",
+                proposal_id,
+                type(exc).__name__,
+                "".join(traceback.format_tb(exc.__traceback__)),
+            )
             self._stage(proposal_id, "failed")
             self._update(
                 proposal_id, "failed", error=f"{type(exc).__name__}: {str(exc)[:400]}"

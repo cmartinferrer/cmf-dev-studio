@@ -52,8 +52,12 @@ REVIEW_SCHEMA = {
     "properties": {
         "issues": {"type": "array", "items": {"type": "string"}},
         "recommendation": {"type": "string"},
+        "recommendation_decision": {
+            "type": "string",
+            "enum": ["accepted", "rejected", "none"],
+        },
     },
-    "required": ["issues", "recommendation"],
+    "required": ["issues", "recommendation", "recommendation_decision"],
 }
 
 

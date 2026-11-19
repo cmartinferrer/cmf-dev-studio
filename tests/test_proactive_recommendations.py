@@ -16,15 +16,17 @@ from cmf_dev_studio.projects.intelligence import prepare_context
 @pytest.mark.parametrize(
     "suggestion", ["Rename sumar to add for consistency", "", None, 42]
 )
-def test_recommendation_is_optional_and_not_patch_context(
+def test_investigator_advice_is_not_published_before_patch(
     tmp_path, monkeypatch, suggestion
 ):
-    """Persist valid advice without adding it to developer instructions or writes."""
+    """Pass preliminary advice as data without publishing unreviewed advice."""
     prompts = []
 
     class Model:
         def generate(self, prompt):
             prompts.append(prompt)
+            if "ROLE: RECOMMENDATION" in prompt:
+                return json.dumps({"recommendation": ""})
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps(
                     {
@@ -77,19 +79,22 @@ def test_recommendation_is_optional_and_not_patch_context(
         },
     ).json()
     assert row["status"] == "ready", row
+    assert not any(e["kind"] == "assistant_response" for e in row["events"])
+    handoff = next(e for e in row["events"] if e["kind"] == "investigation_completed")
+    assert handoff["details"]["message"]
     events = [e for e in row["events"] if e["kind"] == "assistant_recommendation"]
+    assert not events
     if isinstance(suggestion, str) and suggestion:
-        assert len(events) == 1
-        assert events[0]["details"]["message"] == suggestion
-        assert suggestion not in prompts[-1]
-    else:
-        assert not events
-    assert len(prompts) == 2
+        assert suggestion in prompts[-1]
+    assert len(prompts) == 3
     assert source.read_text() == original
     assert [change["path"] for change in row["changes"]] == ["calc.py"]
 
 
-@pytest.mark.parametrize("role", ["developer", "tester", "both", "quick"])
+@pytest.mark.parametrize(
+    "role",
+    ["developer", "tester", "both", "quick", "investigator", "investigator_quick"],
+)
 def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
     """Collect optional advice from existing calls, including quick patches."""
     advice = "Rename multiplicar to multiply for consistent naming"
@@ -98,6 +103,10 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
     class Model:
         def generate(self, prompt):
             prompts.append(prompt)
+            if "ROLE: RECOMMENDATION" in prompt:
+                return json.dumps(
+                    {"recommendation": advice if role != "developer" else ""}
+                )
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps(
                     {
@@ -109,7 +118,10 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
                             }
                         ],
                         "recommendation": (
-                            advice if role in ("developer", "both", "quick") else ""
+                            advice
+                            if role
+                            in ("developer", "both", "quick", "investigator_quick")
+                            else ""
                         ),
                     }
                 )
@@ -117,7 +129,14 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
                 return json.dumps(
                     {
                         "issues": [],
-                        "recommendation": advice if role in ("tester", "both") else "",
+                        "recommendation": (
+                            advice if role in ("tester", "both", "investigator") else ""
+                        ),
+                        "recommendation_decision": (
+                            "accepted"
+                            if role in ("tester", "both", "investigator")
+                            else "rejected"
+                        ),
                     }
                 )
             if "ROLE: ANALYST" in prompt:
@@ -126,10 +145,14 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
                 )
             return json.dumps(
                 {
-                    "action": "quick_patch" if role == "quick" else "patch",
+                    "action": (
+                        "quick_patch"
+                        if role in ("quick", "investigator_quick")
+                        else "patch"
+                    ),
                     "query": "",
                     "message": "Add addition",
-                    "recommendation": "",
+                    "recommendation": advice if role.startswith("investigator") else "",
                 }
             )
 
@@ -164,9 +187,72 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
         },
     ).json()
     assert row["status"] == "ready", row
+    assert not any(e["kind"] == "assistant_response" for e in row["events"])
+    handoff = next(e for e in row["events"] if e["kind"] == "investigation_completed")
+    assert handoff["details"]["message"]
     events = [e for e in row["events"] if e["kind"] == "assistant_recommendation"]
-    assert len(events) == 1
-    assert events[0]["details"]["message"] == advice
-    assert len(prompts) == (2 if role == "quick" else 4)
-    assert all(advice not in prompt for prompt in prompts)
+    if role == "developer":
+        assert not events
+    else:
+        assert len(events) == 1
+        assert events[0]["details"]["message"] == advice
+    assert len(prompts) == (3 if role in ("quick", "investigator_quick") else 5)
+    if role.startswith("investigator"):
+        assert advice in next(p for p in prompts if "FINAL OUTPUT CONTRACT" in p)
+        assert advice in prompts[-1]
+    else:
+        assert all(
+            advice not in prompt
+            for prompt in prompts
+            if "ROLE: TESTER" not in prompt and "ROLE: RECOMMENDATION" not in prompt
+        )
+    if role in ("developer", "both"):
+        assert advice in prompts[-1]
     assert source.read_text() == original
+
+
+def test_requested_rename_is_not_published_as_optional_advice():
+    """The final reviewer can veto advice that duplicates the requested patch."""
+    from cmf_dev_studio.contracts import Plan
+    from cmf_dev_studio.orchestrator import Orchestrator
+
+    task = "Rename multiplicar to multiply and update all references"
+    advice = "Update CLI and tests to use multiply"
+    prompts = []
+    published = []
+
+    class Model:
+        def generate(self, prompt):
+            prompts.append(prompt)
+            if "ROLE: TESTER" in prompt:
+                assert task in prompt
+                assert advice in prompt
+                assert "Proposed diffs" in prompt
+                assert "an empty string vetoes earlier advice" in prompt
+                return json.dumps({"issues": [], "recommendation": ""})
+            return json.dumps(
+                {
+                    "operations": [
+                        {
+                            "action": "modify",
+                            "path": "calc.py",
+                            "content": "def multiply(a,b): return a*b\n",
+                        }
+                    ],
+                    "recommendation": advice,
+                }
+            )
+
+    engine = Orchestrator(Model(), on_recommendation=published.append)
+    operations = engine.reviewed_patch(
+        task,
+        task,
+        Plan((task,), ("References updated",)),
+        {"calc.py": b"def multiplicar(a,b): return a*b\n"},
+        {"calc.py"},
+        lambda _: None,
+        lambda _: None,
+    )
+    assert "def multiply" in operations[0]["content"]
+    assert not any(published)
+    assert len(prompts) == 2

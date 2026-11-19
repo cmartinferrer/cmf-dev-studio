@@ -58,7 +58,11 @@ class DeveloperAgent:
         )
         instructions += "\nCODE AWARENESS: " + code_awareness_guidance() + "\n"
         instructions += "\nTEST QUALITY: " + test_quality_guidance() + "\n"
-        instructions += "\nOPTIONAL ADVICE: " + recommendation_guidance() + "\n"
+        instructions += (
+            "\nOPTIONAL ADVICE: "
+            + recommendation_guidance()
+            + " Evaluate advice against the complete operations you are about to return, not just the original code.\n"
+        )
         last_error = ""
         for attempt in range(max_attempts):
             request = prompt + instructions
