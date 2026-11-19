@@ -1,3 +1,4 @@
+import { visibleChatEvents } from './chatEvents';
 import { chatDay, chatTime } from './chatDates';
 import { terminalTask, type TerminalContext } from './terminalContext';
 import type { TerminalSession } from './terminalSessions';
@@ -28,7 +29,7 @@ function HistoryContext({paths}:{paths?:string[]}) {
 function Conversation({item,projectName,onReview}:{item:Proposal;projectName:string;onReview:Props['onReview']}) {
   // Use persisted facts, not additional model calls or invented explanations.
   const t = translator(item.task,item.assistant_language);
-  const events = (item.events ?? []).filter(e=>!['requested','agent_stage','exploration_tool'].includes(e.kind));
+  const events = visibleChatEvents(item.events ?? []);
   const generated = events.filter(e=>['files_generated','repair_ready'].includes(e.kind));
   const lastGenerated = generated[generated.length-1]?.sequence;
   const assistant = (children:React.ReactNode) => <div className="chat-dialog-assistant"><div className="chat-dialog-author"><Bot size={14}/> {t('Assistant','Asistente')}</div>{children}</div>;

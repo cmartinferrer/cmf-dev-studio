@@ -2,7 +2,7 @@
 
 import json
 
-from cmf_dev_studio.agents.investigator import Investigator
+from cmf_dev_studio.agents.investigator import MAX_ROUNDS, Investigator
 
 
 class Model:
@@ -108,8 +108,10 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
     attempts = []
 
     class Engine:
-        def __init__(self, client, *, on_recommendation=None):
-            pass
+        def __init__(
+            self, client, *, on_recommendation=None, independent_recommendations=False
+        ):
+            assert independent_recommendations is True
 
         def prepare(
             self,
@@ -186,3 +188,50 @@ def test_permission_question_is_normalized_and_grant_is_not_repeated():
     agent = Investigator(model, {}, {}, True, lambda *_: None)
     assert agent.run("create", [], "Spanish", [])[0] == "patch"
     assert "Already authorized" in model.prompts[-1]
+
+
+def test_invalid_tool_request_recovers():
+    """Correct invalid requests within the existing investigation budget."""
+    model = Model(
+        [
+            ("read", "", ""),
+            ("unknown", "a.py", ""),
+            ("search", "x" * 301, ""),
+            ("read", "a.py", ""),
+            ("patch", "", "Fix"),
+        ]
+    )
+    agent = Investigator(model, {"a.py": b"hello"}, {}, True, lambda *_: None)
+    assert agent.run("fix", [], "English", []) == ("patch", "Fix")
+    assert '"code": "invalid_query"' in model.prompts[1]
+    assert '"code": "unknown_tool"' in model.prompts[2]
+    assert agent.approved == {"a.py": "hello"}
+
+
+def test_invalid_tool_requests_are_bounded():
+    """Repeated invalid calls cannot loop indefinitely."""
+    model = Model([("read", "", "")] * MAX_ROUNDS)
+    agent = Investigator(model, {}, {}, True, lambda *_: None)
+    assert agent.run("fix", [], "English", [])[0] == "question"
+    assert len(model.prompts) == MAX_ROUNDS
+
+
+def test_followup_receives_historical_recommendation():
+    """Expose prior advice without granting access to current source files."""
+    advice = "Refactor CLI using a dispatcher dictionary."
+    model = Model([("permission", "", "May I inspect the CLI?")])
+    agent = Investigator(
+        model, {"calc.py": b"current source"}, {}, False, lambda *_: None
+    )
+    history = [
+        {
+            "task": "Add maximum",
+            "response": "",
+            "snapshot_unchanged": False,
+            "recommendation": advice,
+            "outcome": "applied",
+        }
+    ]
+    assert agent.run("Apply your advice", [], "English", history)[0] == "permission"
+    assert advice in model.prompts[0]
+    assert "current source" not in model.prompts[0]

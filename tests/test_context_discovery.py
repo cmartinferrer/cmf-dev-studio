@@ -24,6 +24,8 @@ def test_late_context_discovery(tmp_path, monkeypatch, decision):
     class Model:
         def generate(self, prompt):
             prompts.append(prompt)
+            if "ROLE: RECOMMENDATION" in prompt:
+                return json.dumps({"recommendation": ""})
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps({"operations": operations})
             if decision is None and '"exploration_allowed": false' in prompt:
@@ -87,6 +89,7 @@ def test_late_context_discovery(tmp_path, monkeypatch, decision):
     else:
         assert row["status"] == "ready", row
         assert "test_calc.py" in row["approved_paths"]
-        assert "unique test marker" in prompts[-1]
+        developer_prompts = [p for p in prompts if "FINAL OUTPUT CONTRACT" in p]
+        assert "unique test marker" in developer_prompts[-1]
         assert sum(e["kind"] == "exploration_allowed" for e in row["events"]) == 1
         assert sum("FINAL OUTPUT CONTRACT" in p for p in prompts) == 2

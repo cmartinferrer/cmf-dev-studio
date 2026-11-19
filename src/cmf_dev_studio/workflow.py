@@ -96,8 +96,8 @@ def recommendation_guidance() -> str:
         "requested naming and style; consider reuse, duplication and related test gaps. "
         "For example, if new methods must follow a naming convention and an existing "
         "peer violates it, recommend aligning that peer, citing its actual name. "
-        "Return recommendation as a concise string naming the affected symbol or file "
-        "and explaining why; return an empty string only if no relevant evidence exists. "
+        "Before returning advice, compare it semantically with the original user task, all plan requirements and acceptance criteria, and the complete proposed changes (when available). Never recommend a requested change, a necessary consequence of it, a planned change, or a change already implemented by the patch. Required missing work is not optional advice. If the candidate overlaps the task or patch, discard it even if it improves consistency. Return recommendation as a concise string naming the affected symbol or file "
+        "and explaining why; return an empty string if no distinct, evidence-backed optional improvement remains or its scope is uncertain. "
         "Use the user's language. Never implement optional advice, add it to requirements "
         "or report it as a blocking issue. Do not explore solely to find advice."
     )
