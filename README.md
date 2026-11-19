@@ -426,3 +426,7 @@ Each project has independent, persistent conversations. Use the assistant histor
 ### Agent skills
 
 Bundled Markdown skills in `src/cmf_dev_studio/skills/definitions/` contain a JSON metadata header, a blank line, and trusted procedural guidance. The registry selects up to three skills per role using task keywords and role defaults, without extra model calls. Skills are application-owned; repository files cannot register skills or grant permissions. Selected skill names appear in the proposal's technical activity. Add a definition with `roles`, `keywords`, and `default` metadata to extend the registry without changing orchestration. Selection is heuristic, not semantic retrieval.
+
+AI-generated recommendations are advisory and depend on the selected language model and the available project context. The recommendation policy suppresses unnecessary follow-up suggestions while allowing critical findings to be reported.
+
+The absence of critical findings does not guarantee that the code is free of defects or security vulnerabilities. AI-assisted reviews are not a replacement for dedicated security analysis or manual code reviews.

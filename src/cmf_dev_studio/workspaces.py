@@ -38,6 +38,7 @@ from cmf_dev_studio.projects.python_environment import (
     preparation_needed,
     prepare_environment,
 )
+from cmf_dev_studio.recommendations import RecommendationPolicy
 from cmf_dev_studio.skills.registry import SkillContext
 from cmf_dev_studio.terminal_context import (
     normalize_terminal_context,
@@ -859,19 +860,23 @@ class WorkspaceService:
             + json.dumps(history, ensure_ascii=False)
         )
 
-    def _record_recommendation(self, proposal_id, message):
-        """Persist at most one optional recommendation per proposal, across retries."""
+    def _record_recommendation(self, proposal_id, message, *, critical=False):
+        """Persist at most one finding of each severity per proposal, across retries."""
         if not message:
             return
         with self._db() as db:
             db.execute("BEGIN IMMEDIATE")
             exists = db.execute(
-                "SELECT 1 FROM proposal_events WHERE proposal_id=? AND kind=?",
-                (proposal_id, "assistant_recommendation"),
+                "SELECT 1 FROM proposal_events WHERE proposal_id=? AND kind=? AND COALESCE(json_extract(details, '$.critical'), 0)=?",
+                (proposal_id, "assistant_recommendation", int(critical)),
             ).fetchone()
             if not exists:
                 self._event(
-                    db, proposal_id, "assistant_recommendation", message=message
+                    db,
+                    proposal_id,
+                    "assistant_recommendation",
+                    message=message,
+                    critical=critical,
                 )
 
     def _skill_context(self, proposal_id):
@@ -918,6 +923,7 @@ class WorkspaceService:
                     message=message,
                     paths=list(investigator.approved),
                     recommendation=investigator.recommendation,
+                    applying_recommendation=investigator.applying_recommendation,
                 )
                 db.execute(
                     "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
@@ -928,7 +934,13 @@ class WorkspaceService:
                 proposal_id,
                 "awaiting_exploration" if action == "permission" else "answered",
             )
-        return action, message, investigator.approved, investigator.recommendation
+        return (
+            action,
+            message,
+            investigator.approved,
+            investigator.recommendation,
+            investigator.applying_recommendation,
+        )
 
     def _db(self):
         db = sqlite3.connect(self.manager.db_path, timeout=30)
@@ -1157,6 +1169,8 @@ class WorkspaceService:
                         proposal_id,
                     ),
                 )
+            if plan is None and stage.startswith("recommendation_"):
+                self._event(db, proposal_id, "agent_stage", stage=stage)
             if plan is None and stage in (
                 "analyst",
                 "developer",
@@ -1279,9 +1293,22 @@ class WorkspaceService:
                 GeminiClient(),
                 independent_recommendations=True,
                 skills=self._skill_context(proposal_id),
+                on_critical_recommendation=lambda message: self._record_recommendation(
+                    proposal_id, message, critical=True
+                ),
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),
+            )
+            engine.recommendation_policy = RecommendationPolicy(
+                next(
+                    (
+                        e["details"].get("applying_recommendation") is True
+                        for e in reversed(row["events"])
+                        if e["kind"] == "investigation_completed"
+                    ),
+                    False,
+                )
             )
             project = self.manager.get(row["project_id"])
             if project is None:
@@ -1433,7 +1460,13 @@ class WorkspaceService:
             self._event(db, proposal_id, "exploration_tool", stage=action, query=query)
 
     def _save_discovered_context(
-        self, proposal_id, action, message, discovered, recommendation=""
+        self,
+        proposal_id,
+        action,
+        message,
+        discovered,
+        recommendation="",
+        applying_recommendation=False,
     ):
         with self._db() as db:
             self._event(
@@ -1444,6 +1477,7 @@ class WorkspaceService:
                 message=message,
                 paths=list(discovered),
                 recommendation=recommendation,
+                applying_recommendation=applying_recommendation,
             )
             db.execute(
                 "UPDATE workspace_proposals SET approved_paths=? WHERE id=?",
@@ -1465,6 +1499,9 @@ class WorkspaceService:
                 client,
                 independent_recommendations=True,
                 skills=self._skill_context(proposal_id),
+                on_critical_recommendation=lambda message: self._record_recommendation(
+                    proposal_id, message, critical=True
+                ),
                 on_recommendation=lambda message: self._record_recommendation(
                     proposal_id, message
                 ),
@@ -1497,6 +1534,9 @@ class WorkspaceService:
                 if completed:
                     action, message = completed["action"], completed["message"]
                     recommendation = completed.get("recommendation", "")
+                    applying_recommendation = (
+                        completed.get("applying_recommendation") is True
+                    )
                     discovered = {
                         p: original[p].decode("utf-8") for p in completed["paths"]
                     }
@@ -1514,11 +1554,20 @@ class WorkspaceService:
                         "",
                     )
                 else:
-                    action, message, discovered, recommendation = self._investigate(
+                    (
+                        action,
+                        message,
+                        discovered,
+                        recommendation,
+                        applying_recommendation,
+                    ) = self._investigate(
                         proposal_id, client, task, context, original, row
                     )
                 if action not in ("patch", "quick_patch"):
                     return
+                engine.recommendation_policy = RecommendationPolicy(
+                    applying_recommendation
+                )
                 options["investigation_recommendation"] = recommendation
                 approved_paths = set(discovered)
                 approved = with_terminal_context(
@@ -1562,6 +1611,7 @@ class WorkspaceService:
                         message,
                         investigator.approved,
                         recommendation,
+                        applying_recommendation,
                     )
                     return with_terminal_context(
                         "\n\n".join(

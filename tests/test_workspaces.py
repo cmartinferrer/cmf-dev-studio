@@ -223,7 +223,7 @@ def test_empty_project_language_reaches_all_agents(tmp_path, language, label, fi
             {"operations": [{"action": "create", "path": filename, "content": ""}]}
         ),
         json.dumps({"issues": []}),
-        json.dumps({"recommendation": ""}),
+        json.dumps({"recommendation": "", "critical": ""}),
     ]
     module = types.ModuleType("cmf_dev_studio.llm.gemini")
     module.GeminiClient = lambda: llm

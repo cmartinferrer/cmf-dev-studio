@@ -25,7 +25,7 @@ def test_late_context_discovery(tmp_path, monkeypatch, decision):
         def generate(self, prompt):
             prompts.append(prompt)
             if "ROLE: RECOMMENDATION" in prompt:
-                return json.dumps({"recommendation": ""})
+                return json.dumps({"recommendation": "", "critical": ""})
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps({"operations": operations})
             if decision is None and '"exploration_allowed": false' in prompt:

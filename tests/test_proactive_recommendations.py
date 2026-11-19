@@ -26,7 +26,7 @@ def test_investigator_advice_is_not_published_before_patch(
         def generate(self, prompt):
             prompts.append(prompt)
             if "ROLE: RECOMMENDATION" in prompt:
-                return json.dumps({"recommendation": ""})
+                return json.dumps({"recommendation": "", "critical": ""})
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps(
                     {
@@ -105,7 +105,10 @@ def test_recommendations_from_patch_roles(tmp_path, monkeypatch, role):
             prompts.append(prompt)
             if "ROLE: RECOMMENDATION" in prompt:
                 return json.dumps(
-                    {"recommendation": advice if role != "developer" else ""}
+                    {
+                        "recommendation": advice if role != "developer" else "",
+                        "critical": "",
+                    }
                 )
             if "FINAL OUTPUT CONTRACT" in prompt:
                 return json.dumps(

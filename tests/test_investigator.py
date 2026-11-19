@@ -115,6 +115,7 @@ def test_api_permission_and_patch(tmp_path, monkeypatch):
             on_recommendation=None,
             independent_recommendations=False,
             skills=None,
+            on_critical_recommendation=None,
         ):
             assert independent_recommendations is True
 

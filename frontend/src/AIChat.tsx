@@ -1,4 +1,4 @@
-import { visibleChatEvents } from './chatEvents';
+import { visibleChatEvents, activityStageLabel } from './chatEvents';
 import { chatDay, chatTime } from './chatDates';
 import { terminalTask, type TerminalContext } from './terminalContext';
 import type { TerminalSession } from './terminalSessions';
@@ -40,7 +40,7 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
     {events.map((event,index)=>{const d=event.details;let content:React.ReactNode;
       switch(event.kind){
         case 'assistant_response':  content=assistant(<p style={{whiteSpace:'pre-wrap'}}>{d.message || t('I need permission to explore the project.','Necesito permiso para explorar el proyecto.')}</p>);break;
-        case 'assistant_recommendation': content=assistant(<><p><strong>{t('Optional recommendation','Recomendación opcional')}</strong></p><p style={{whiteSpace:'pre-wrap'}}>{d.message}</p><p>{t('Optional follow-up. Ask me if you want to implement it.','Mejora opcional para más adelante. Pídemelo si quieres implementarla.')}</p></>);break;
+        case 'assistant_recommendation': content=assistant(<><p><strong>{d.critical ? t('Critical finding','Hallazgo crítico') : t('Optional recommendation','Recomendación opcional')}</strong></p><p style={{whiteSpace:'pre-wrap'}}>{d.message}</p>{!d.critical && <p>{t('Optional follow-up. Ask me if you want to implement it.','Mejora opcional para más adelante. Pídemelo si quieres implementarla.')}</p>}</>);break;
         case 'exploration_allowed': content=user(t('Allow exploration','Permitir exploración'));break;
         case 'exploration_denied': content=user(t('Deny exploration','Denegar exploración'));break;
         case 'files_generated': case 'repair_ready': content=assistant(<><p>{event.kind==='repair_ready'?t('I have prepared a revised proposal.','He preparado una propuesta corregida.'):t(`I have prepared ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'file':'files'} for your request.`,`He preparado ${d.count ?? item.changes.length} ${(d.count ?? item.changes.length)===1?'fichero':'ficheros'} para tu petición.`)}</p>{event.sequence===lastGenerated&&files}</>);break;
@@ -67,7 +67,7 @@ function Conversation({item,projectName,onReview}:{item:Proposal;projectName:str
     {!generated.length&&item.changes.length>0&&assistant(files)}
     {!events.some(e=>e.kind==='tests_passed'||e.kind==='tests_failed')&&item.test_output&&assistant(<><p>{item.status==='test_failed'?t('The tests failed.','Los tests han fallado.'):t('Test result','Resultado de los tests')}</p>{output(item.test_output)}</>)}
     {item.status==='applied'&&!events.some(e=>e.kind==='changes_applied')&&assistant(<p>{t('The changes are saved.','Los cambios están guardados.')}</p>)}
-    {!!item.events?.some(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind))&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind)).map(e=><div key={e.sequence}>{e.kind==='skill_selected'?`${t('Skills','Skills')}: `:''}{e.details.stage} {e.details.query} · {chatTime(e.created_at,true)}</div>)}</details>}
+    {!!item.events?.some(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind))&&<details className="chat-history-detail"><summary>{t('Technical activity','Actividad técnica')}</summary>{item.events.filter(e=>['agent_stage','exploration_tool','skill_selected'].includes(e.kind)).map(e=><div key={e.sequence}>{e.kind==='skill_selected'?`${t('Skills','Skills')}: `:''}{activityStageLabel(e.details.stage, t)} {e.details.query} · {chatTime(e.created_at,true)}</div>)}</details>}
   </div>;
 }
 

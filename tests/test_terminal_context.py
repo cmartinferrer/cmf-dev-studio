@@ -66,6 +66,7 @@ def test_api_passes_terminal_evidence_to_agents(tmp_path, monkeypatch):
             on_recommendation=None,
             independent_recommendations=False,
             skills=None,
+            on_critical_recommendation=None,
         ):
             assert independent_recommendations is True
 

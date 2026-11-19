@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { visibleChatEvents } from '../src/chatEvents.ts';
+import { visibleChatEvents, activityStageLabel } from '../src/chatEvents.ts';
 import type { ProposalEvent } from '../src/api.ts';
 
 test('hides internal handoffs while preserving answers, permissions and recommendations', () => {
@@ -19,4 +19,14 @@ test('hides internal handoffs while preserving answers, permissions and recommen
 test('skill selections stay in technical activity, not conversational messages', () => {
   const event: ProposalEvent = {sequence: 1, kind: 'skill_selected', created_at: '', details: {stage: 'developer', query: 'safe-refactoring'}};
   assert.deepEqual(visibleChatEvents([event]), []);
+});
+
+
+test('review activity distinguishes critical findings, no findings and failures', () => {
+  const es = (_en: string, spanish: string) => spanish;
+  assert.equal(activityStageLabel('recommendation_critical_only', es), 'Revisión de recomendaciones: solo críticas');
+  assert.equal(activityStageLabel('recommendation_result_critical', es), 'Revisión: hallazgo crítico');
+  assert.equal(activityStageLabel('recommendation_result_none', es), 'Revisión: sin hallazgos');
+  assert.equal(activityStageLabel('recommendation_result_failed', es), 'Revisión: fallida');
+  assert.equal(activityStageLabel('developer', es), 'developer');
 });
