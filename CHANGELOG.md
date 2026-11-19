@@ -7,6 +7,50 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-19
+
+### Added
+
+- Workspace productivity improvements and enhanced editor interactions.
+- Terminal output integration with the AI assistant, including bounded terminal snapshots and sensitive data redaction.
+- Persistent chat conversation management with support for multiple conversations per project.
+- External project management for existing local repositories.
+- Centralized Agentic Tool Registry with reusable tools for repository investigation.
+- Centralized Skill Registry with reusable Markdown-based skill definitions.
+- Dynamic skill selection across Investigator, Analyst, Developer, Tester and Recommendation agents.
+- Conversational context across agent workflows, including follow-up questions and references to previous recommendations.
+- Independent Recommendation Agent for reviewing proposed repository changes.
+- Recommendation policy supporting optional recommendations and critical findings.
+- Critical-only review mode when applying previous recommendations, including mixed requests.
+- Technical activity tracking for tool execution, skill selection, recommendation policies and review outcomes.
+- Automated release validation and publication workflow.
+- Expanded automated regression coverage for workspace operations, conversation management, agent tools, skills and recommendation policies.
+
+### Changed
+
+- Improved workspace layout, user interface consistency and developer productivity.
+- Improved assistant investigation, context discovery and agent coordination.
+- Improved conversational workflows and preservation of context across requests.
+- Improved recommendation relevance and reduced unnecessary follow-up suggestions.
+- Improved internal architecture, storage lifecycle management and technical maintainability.
+- Updated frontend dependencies and security-related transitive dependencies.
+- Introduced a Git Flow development and release workflow.
+- Updated project documentation to reflect the new workspace and agentic capabilities.
+
+### Fixed
+
+- Improved recommendation context sharing and review scope.
+- Improved handling of invalid investigation tool requests.
+- Prevented optional recommendation review failures from blocking proposal generation.
+- Improved preservation of recommendation policy across generation retries and repairs.
+- Resolved issues affecting conversational context and references to previous assistant recommendations.
+
+### Known Limitations
+
+- AI-generated recommendations depend on the selected language model and available project context.
+- Proactive critical finding detection is advisory. The absence of critical findings does not guarantee that the code is free of defects or security vulnerabilities.
+- AI-assisted reviews are not a replacement for dedicated security analysis or manual code reviews.
+
 ## [0.3.0] - 2026-11-17
 
 ### Added
@@ -90,7 +134,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - SQLite persistence for project and proposal data.
 - GitHub Actions CI, dependency security auditing and secret scanning.
 
-[Unreleased]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cmartinferrer/cmf-dev-studio/compare/v0.1.0...v0.2.0
