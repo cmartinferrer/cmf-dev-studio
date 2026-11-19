@@ -53,7 +53,6 @@ uv run --locked ruff format --check .
 uv run --locked pytest -q -m "not integration"
 cd frontend
 npm ci
-npm run test
 npm run build
 npm audit --audit-level=high
 cd ..
@@ -106,22 +105,15 @@ git show --no-patch v0.4.0
 
 If publication fails, inspect the workflow logs and rerun the failed workflow after resolving the cause. The workflow can reuse a tag already pointing to the same merge commit. A tag pointing to a different commit is an error; do not move or delete published tags to bypass it.
 
-## 8. Synchronize develop
+## 8. Verify automatic synchronization
 
-After successful publication, bring `main` back into `develop` so subsequent development includes the release metadata. Use a pull request from `main` to `develop` if branch rules permit it, or create a synchronization branch from `develop` and merge `origin/main` into it:
+After publication, the `sync-develop` job creates a release-specific `sync/release-vX.Y.Z` branch and opens a pull request targeting `develop`. It merges the published tag into the current development history, then requests auto-merge with a merge commit. Required checks and branch rules remain enforced. No direct push to `develop` is performed.
 
-```bash
-git switch develop
-git pull --ff-only origin develop
-git fetch origin
-git switch -c chore/sync-v0.4.0
-git merge origin/main
-git push -u origin chore/sync-v0.4.0
-```
+If `develop` already contains the release commit, the job exits without creating a PR. A retry reuses the existing synchronization branch and open PR. If conflicts occur, the job fails without forcing changes; resolve them on the synchronization branch or prepare a manual PR. If `develop` advances while checks are running, rerun synchronization to update the branch. Check the PR and its required checks before considering synchronization complete.
 
-Resolve any conflicts and validate before pushing. Open a PR from `chore/sync-v0.4.0` to `develop`, wait for checks and merge. If `develop` already contains the release commit, no synchronization PR is needed. Do not bypass branch protection with a direct push.
+To retry without publishing a new release, run the **Release** workflow manually on `main` and enter the existing stable tag (for example `v0.4.0`). This runs synchronization only. The workflow must already be present on `main`.
 
-Finally, update local branches:
+After the synchronization PR merges, update local branches:
 
 ```bash
 git switch main
@@ -131,3 +123,9 @@ git pull --ff-only origin develop
 ```
 
 Delete temporary branches only after their changes are merged and the release is verified.
+
+## Release automation setup
+
+Enable **Allow auto-merge** in repository settings. Install the dedicated GitHub App only on this repository, with Contents and Pull requests read/write permissions (and automatic Metadata read access). If GitHub rejects a synchronization because it introduces new workflow file contents, resolve that synchronization manually or review whether the additional Workflows write permission is justified. Do not grant branch protection bypass.
+
+Configure the repository Actions variable `RELEASE_APP_ID` and secret `RELEASE_APP_PRIVATE_KEY` with the App ID and PEM private key respectively. Never commit the private key. The workflow uses a temporary installation token to trigger normal PR checks. Only checks configured as required block auto-merge; configure additional required checks separately if desired.

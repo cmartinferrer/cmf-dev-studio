@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Automatic post-release synchronization into develop through protected pull requests and auto-merge, with manual retry support.
+
 ## [0.4.0] - 2026-11-19
 
 ### Added

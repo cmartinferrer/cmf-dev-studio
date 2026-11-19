@@ -4,6 +4,12 @@ on:
   pull_request:
     branches: [main]
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable release tag to synchronize
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -64,3 +70,42 @@ jobs:
             gh release create "$tag" --verify-tag --title "CMF Dev Studio $tag" \
               --notes-file "$notes"
           fi
+
+  sync-develop:
+    needs: publish
+    if: >-
+      always() && !cancelled() &&
+      (needs.publish.result == 'success' ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: release-sync-develop
+      cancel-in-progress: false
+    steps:
+      - name: Generate release bot token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout trusted release workflow code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          token: ${{ steps.app-token.outputs.token }}
+          fetch-depth: 0
+
+      - name: Synchronize published release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ github.event.pull_request.head.ref }}
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${MANUAL_TAG:-${RELEASE_BRANCH#release/}}"
+          python3 scripts/sync_develop.py "$tag"
