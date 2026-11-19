@@ -13,7 +13,10 @@ def run(*args: str) -> str:
 
 def ancestor(older: str, newer: str) -> bool:
     """Check ancestry, distinguishing Git errors from a negative result."""
-    result = subprocess.run(["git", "merge-base", "--is-ancestor", older, newer])
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", older, newer],
+        check=False,
+    )
     if result.returncode not in (0, 1):
         result.check_returncode()
     return result.returncode == 0
