@@ -214,3 +214,24 @@ def test_invalid_tool_requests_are_bounded():
     agent = Investigator(model, {}, {}, True, lambda *_: None)
     assert agent.run("fix", [], "English", [])[0] == "question"
     assert len(model.prompts) == MAX_ROUNDS
+
+
+def test_followup_receives_historical_recommendation():
+    """Expose prior advice without granting access to current source files."""
+    advice = "Refactor CLI using a dispatcher dictionary."
+    model = Model([("permission", "", "May I inspect the CLI?")])
+    agent = Investigator(
+        model, {"calc.py": b"current source"}, {}, False, lambda *_: None
+    )
+    history = [
+        {
+            "task": "Add maximum",
+            "response": "",
+            "snapshot_unchanged": False,
+            "recommendation": advice,
+            "outcome": "applied",
+        }
+    ]
+    assert agent.run("Apply your advice", [], "English", history)[0] == "permission"
+    assert advice in model.prompts[0]
+    assert "current source" not in model.prompts[0]
